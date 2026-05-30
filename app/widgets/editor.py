@@ -1,0 +1,267 @@
+﻿import re
+from typing import Dict
+from PySide6.QtWidgets import QTextEdit
+from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QTextCursor, QFont, QFontDatabase
+from app.highlighter import MarkdownHighlighter
+from app.parser import DocumentParser
+
+class PracticeEditor(QTextEdit):
+    practiceClicked = Signal(str)
+    fileClicked = Signal(str)
+    autocompleteRequested = Signal(str, int, str)
+    documentChanged = Signal()
+    ctrlFPressed = Signal()
+    ctrlEPressed = Signal()
+    ctrlNPressed = Signal()
+    f5Pressed = Signal()
+    
+    _practice_link_pattern = re.compile(r'^#\s+(.+)$')
+    _quoted_file_pattern = re.compile(r"""@['"]([^'"]+\.\w+)['"]""")
+    _simple_file_pattern = re.compile(r'@(\S+\.\w+)')
+    _task_indent_pattern = re.compile(r'^(\s*)-\s+')
+    _practice_line_pattern = re.compile(r'^#\s+')
+    _task_line_pattern = re.compile(r'^(\s*)-\s+(?:\[x\]\s+)?(.+)$')
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_font()
+        self.setTabStopDistance(40)
+        self.setAcceptRichText(False)
+        self.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.highlighter = MarkdownHighlighter(self.document())
+        self.last_saved_content = ""
+        self.autocomplete_active = False
+        self.setMouseTracking(True)
+        self._cached_practice_name = ""
+        self._cached_block_number = -1
+        
+    def _setup_font(self):
+        preferred_fonts = ["JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas"]
+        font = QFont()
+        for font_name in preferred_fonts:
+            font.setFamily(font_name)
+            if QFontDatabase.hasFamily(font_name):
+                break
+        font.setPointSize(11)
+        font.setStyleHint(QFont.Monospace)
+        self.setFont(font)
+    
+    def update_theme(self, theme: Dict):
+        self.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {theme['editor_background']};
+                color: {theme['editor_text']};
+                border: none;
+                padding: 16px;
+                line-height: 1.6;
+                selection-background-color: {theme['accent_light']};
+            }}
+        """)
+        self.highlighter.update_theme(theme)
+    
+    def _get_link_info(self, text, pos_in_block):
+        if text.startswith('# '):
+            name = text[2:].strip()
+            if 2 <= pos_in_block < 2 + len(name):
+                return ('practice', name)
+            return (None, None)
+        for match in self._quoted_file_pattern.finditer(text):
+            if match.start() <= pos_in_block < match.end():
+                return ('file', match.group(1))
+        for match in self._simple_file_pattern.finditer(text):
+            if match.start() <= pos_in_block < match.end():
+                return ('file', match.group(1))
+        return (None, None)
+    
+    def mouseMoveEvent(self, event):
+        pos = event.position().toPoint()
+        cursor = self.cursorForPosition(pos)
+        block = cursor.block()
+        link_type, _ = self._get_link_info(block.text(), cursor.positionInBlock())
+        self.viewport().setCursor(Qt.PointingHandCursor if link_type else Qt.IBeamCursor)
+        super().mouseMoveEvent(event)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.position().toPoint()
+            cursor = self.cursorForPosition(pos)
+            block = cursor.block()
+            link_type, value = self._get_link_info(block.text(), cursor.positionInBlock())
+            if link_type == 'practice':
+                self.practiceClicked.emit(value)
+                return
+            elif link_type == 'file':
+                self.fileClicked.emit(value)
+                return
+        super().mousePressEvent(event)
+    
+    def get_current_practice_name(self) -> str:
+        cursor = self.textCursor()
+        block = cursor.block()
+        block_num = block.blockNumber()
+        if block_num == self._cached_block_number and self._cached_practice_name:
+            return self._cached_practice_name
+        match = self._practice_link_pattern.match(block.text().strip())
+        if match:
+            name = match.group(1).strip()
+            self._cached_practice_name = name
+            self._cached_block_number = block_num
+            return name
+        block = block.previous()
+        while block.isValid():
+            match = self._practice_link_pattern.match(block.text().strip())
+            if match:
+                name = match.group(1).strip()
+                self._cached_practice_name = name
+                self._cached_block_number = block.blockNumber()
+                return name
+            block = block.previous()
+        return ""
+
+    def keyPressEvent(self, event):
+        cursor = self.textCursor()
+        block = cursor.block()
+        text = block.text()
+        pos_in_block = cursor.positionInBlock()
+        
+        # Ctrl+Shift+↑↓ deve essere controllato PRIMA di Ctrl semplice
+        if event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+            if event.key() == Qt.Key_Up:
+                self._move_line(-1)
+                return
+            elif event.key() == Qt.Key_Down:
+                self._move_line(1)
+                return
+        
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_D:
+                self._toggle_task_done()
+                return
+            elif event.key() == Qt.Key_F:
+                self.ctrlFPressed.emit()
+                return
+            elif event.key() == Qt.Key_E:
+                self.ctrlEPressed.emit()
+                return
+            elif event.key() == Qt.Key_N:
+                self.ctrlNPressed.emit()
+                return
+        
+        if event.key() == Qt.Key_F5:
+            self.f5Pressed.emit()
+            return
+        
+        if event.text() == '#' and pos_in_block == 0 and not self.autocomplete_active:
+            super().keyPressEvent(event)
+            QTimer.singleShot(0, lambda: self.autocompleteRequested.emit('practice', cursor.position(), ""))
+            return
+        
+        if event.text() == '@' and not self.autocomplete_active:
+            super().keyPressEvent(event)
+            practice_name = self.get_current_practice_name()
+            QTimer.singleShot(0, lambda: self.autocompleteRequested.emit('file', cursor.position(), practice_name))
+            return
+        
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self._practice_line_pattern.match(text):
+                super().keyPressEvent(event)
+                self.textCursor().insertText("- ")
+                return
+            task_match = self._task_indent_pattern.match(text)
+            if task_match:
+                indent = task_match.group(1)
+                super().keyPressEvent(event)
+                self.textCursor().insertText(f"{indent}- ")
+                return
+        
+        if event.key() == Qt.Key_Tab:
+            if cursor.hasSelection():
+                self._indent_selection(1)
+                return
+            task_match = self._task_indent_pattern.match(text)
+            if task_match:
+                cursor.movePosition(QTextCursor.StartOfBlock)
+                cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                cursor.insertText("  " + text)
+                return
+        
+        if event.key() == Qt.Key_Backtab:
+            if cursor.hasSelection():
+                self._indent_selection(-1)
+                return
+            task_match = re.match(r'^(\s+)-\s+', text)
+            if task_match and len(task_match.group(1)) >= 2:
+                cursor.movePosition(QTextCursor.StartOfBlock)
+                cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                cursor.insertText(text[2:])
+                return
+        
+        super().keyPressEvent(event)
+        if not self.autocomplete_active:
+            QTimer.singleShot(100, lambda: self.documentChanged.emit())
+    
+    def _toggle_task_done(self):
+        cursor = self.textCursor()
+        block = cursor.block()
+        text = block.text()
+        new_text = DocumentParser.toggle_task_status(text)
+        if new_text != text:
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+            cursor.insertText(new_text)
+            self.documentChanged.emit()
+    
+    def _move_line(self, direction: int):
+        cursor = self.textCursor()
+        block = cursor.block()
+        if direction < 0:
+            prev_block = block.previous()
+            if not prev_block.isValid():
+                return
+        else:
+            next_block = block.next()
+            if not next_block.isValid():
+                return
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        current_line = cursor.selectedText() + '\n'
+        cursor.removeSelectedText()
+        if direction < 0:
+            insert_cursor = QTextCursor(block.previous())
+            insert_cursor.movePosition(QTextCursor.StartOfBlock)
+        else:
+            insert_cursor = QTextCursor(block.next())
+            insert_cursor.movePosition(QTextCursor.EndOfBlock)
+        insert_cursor.insertText('\n' + current_line.rstrip('\n'))
+        self.documentChanged.emit()
+    
+    def _indent_selection(self, direction: int):
+        cursor = self.textCursor()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        cursor.setPosition(start)
+        start_block = cursor.block()
+        cursor.setPosition(end)
+        end_block = cursor.block()
+        cursor.beginEditBlock()
+        block = start_block
+        while True:
+            text = block.text()
+            task_match = self._task_line_pattern.match(text)
+            if task_match:
+                block_cursor = QTextCursor(block)
+                block_cursor.movePosition(QTextCursor.StartOfBlock)
+                block_cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                if direction > 0:
+                    block_cursor.insertText("  " + text)
+                else:
+                    if text.startswith("  "):
+                        block_cursor.insertText(text[2:])
+            if block == end_block:
+                break
+            block = block.next()
+            if not block.isValid():
+                break
+        cursor.endEditBlock()
+        self.documentChanged.emit()
