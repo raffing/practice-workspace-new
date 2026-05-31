@@ -34,6 +34,10 @@ class PracticeWorkspace(QMainWindow):
         self.current_theme_mode = ThemeMode.AUTO
         self.current_theme = Theme.get_theme()
         self._refresh_timer = QTimer()
+        # Timer per salvataggio automatico
+        self._autosave_timer = QTimer()
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._autosave_interval = 60  # secondi, 0 = disabilitato
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._do_refresh_tree)
         self.practice_paths: Dict[str, str] = {}
@@ -156,6 +160,13 @@ class PracticeWorkspace(QMainWindow):
         self.theme_btn = QPushButton("🌓")
         self.theme_btn.setToolTip("Cambia tema (Light/Dark/Auto)")
         self.theme_btn.setFixedSize(36, 36)
+        self.autosave_btn = QPushButton("⏱️")
+        self.autosave_btn.setToolTip("Auto-salvataggio: ON (60s)")
+        self.autosave_btn.setFixedSize(36, 36)
+        self.autosave_btn.setCheckable(True)
+        self.autosave_btn.setChecked(True)
+        self.autosave_btn.clicked.connect(self._toggle_autosave)
+        self.toolbar.addWidget(self.autosave_btn)
         self.toolbar.addWidget(self.theme_btn)
 
     def _setup_connections(self):
@@ -253,7 +264,8 @@ class PracticeWorkspace(QMainWindow):
                 "# Condominio Alfa\n- Task amministrativo\n",
                 encoding='utf-8'
             )
-        self._load_document(agenda_file) 
+        self._load_document(agenda_file)
+        self._start_autosave()
 
 
     def _load_document(self, file_path: Path):
@@ -281,38 +293,11 @@ class PracticeWorkspace(QMainWindow):
             clean_text = self.editor.toPlainText()
             lines = clean_text.split('\n')
             
-            # Raccogli i nomi attuali delle pratiche nell'editor
-            current_names = []
-            for line in lines:
-                if line.startswith('# '):
-                    current_names.append(line[2:].strip())
-            
-            # Trova i vecchi nomi che non esistono più (rinominati)
-            old_orphans = {k: v for k, v in self.practice_paths.items() if k not in current_names}
-            
-            # Nuovo dizionario
-            new_practice_paths = {}
-            
-            for name in current_names:
-                if name in self.practice_paths:
-                    # Nome invariato, mantieni path
-                    new_practice_paths[name] = self.practice_paths[name]
-            
-            # SOLO se c'è ESATTAMENTE un orfano e ESATTAMENTE un nuovo nome senza path,
-            # allora è una rinomina e trasferiamo il path
-            new_without_path = [n for n in current_names if n not in self.practice_paths]
-            if len(old_orphans) == 1 and len(new_without_path) == 1:
-                old_name, old_path = list(old_orphans.items())[0]
-                new_name = new_without_path[0]
-                new_practice_paths[new_name] = old_path
-            
-            self.practice_paths = new_practice_paths
-            
-            # Scrivi il file
             new_lines = []
             for line in lines:
                 if line.startswith('# '):
                     name = line[2:].strip()
+                    # Solo se è già nel dizionario, scrivi con path
                     if name in self.practice_paths:
                         new_lines.append(f'# [{name}]({self.practice_paths[name]})')
                     else:
@@ -338,7 +323,41 @@ class PracticeWorkspace(QMainWindow):
             if reply == QMessageBox.Yes:
                 self._load_document(self.workspace_path / "Agenda.md")
                 self._update_modified_indicator()
+    def _start_autosave(self):
+        """Avvia il timer di salvataggio automatico."""
+        if self._autosave_interval > 0:
+            self._autosave_timer.start(self._autosave_interval * 1000)
 
+    def _autosave(self):
+        """Salva silenziosamente se ci sono modifiche."""
+        if not self.workspace_path:
+            return
+        clean_text = self.editor.toPlainText()
+        lines = clean_text.split('\n')
+        new_lines = []
+        for line in lines:
+            if line.startswith('# '):
+                name = line[2:].strip()
+                if name in self.practice_paths:
+                    new_lines.append(f'# [{name}]({self.practice_paths[name]})')
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        current_with_paths = '\n'.join(new_lines)
+        
+        if current_with_paths != self.editor.last_saved_content:
+            self._save_document()
+            # Non mostrare messaggio nella status bar, è silenzioso
+    
+    def _toggle_autosave(self, checked):
+        if checked:
+            self._autosave_interval = 60
+            self._start_autosave()
+            self.autosave_btn.setToolTip("Auto-salvataggio: ON (60s)")
+        else:
+            self._autosave_timer.stop()
+            self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
     # ========================================================================
     # PRACTICE & FILE OPENING
     # ========================================================================
@@ -390,29 +409,10 @@ class PracticeWorkspace(QMainWindow):
 
     def _on_practice_name_clicked(self, practice_name: str):
         """Click sul nome pratica nell'editor."""
-        # 1. Cerca direttamente nel dizionario
         if practice_name in self.practice_paths:
             self._open_practice_folder(practice_name)
-            return
-        
-        # 2. Se non trovato, cerca se è una pratica rinominata (non ancora salvata)
-        text = self.editor.toPlainText()
-        current_names = set()
-        for line in text.split('\n'):
-            if line.startswith('# '):
-                current_names.add(line[2:].strip())
-        
-        if practice_name in current_names:
-            for old_name, old_path in list(self.practice_paths.items()):
-                if old_name not in current_names:
-                    # Trasferisci il path al nuovo nome
-                    self.practice_paths[practice_name] = old_path
-                    del self.practice_paths[old_name]
-                    self._open_practice_folder(practice_name)
-                    return
-        
-        # 3. Nessun path trovato
-        self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
+        else:
+            self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
 
     # ========================================================================
     # TREE WIDGET
