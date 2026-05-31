@@ -57,7 +57,7 @@ class PracticeWorkspace(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         self._setup_toolbar()
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Horizontal) # type: ignore
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderLabels(["Workspace"])
         self.tree_widget.setMinimumWidth(300)
@@ -70,6 +70,15 @@ class PracticeWorkspace(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.workspace_label = QLabel("Nessun workspace aperto")
         self.status_bar.addWidget(self.workspace_label)
+
+        # Aggiungi:
+        self.cursor_label = QLabel("R: 1, C: 1")
+        self.cursor_label.setStyleSheet("padding: 0 8px;")
+        self.status_bar.addPermanentWidget(self.cursor_label)
+
+        self.stats_label = QLabel("Pratiche: 0 | Task: 0")
+        self.stats_label.setStyleSheet("padding: 0 8px;")
+        self.status_bar.addPermanentWidget(self.stats_label)
 
     def _update_modified_indicator(self):
         """Aggiunge/rimuove * accanto al nome del file nella status bar."""
@@ -95,12 +104,33 @@ class PracticeWorkspace(QMainWindow):
         else:
             self.workspace_label.setText("Agenda.md")
     
+    def _update_cursor_position(self):
+        """Aggiorna la label con riga e colonna del cursore."""
+        cursor = self.editor.textCursor()
+        row = cursor.blockNumber() + 1
+        col = cursor.columnNumber() + 1
+        self.cursor_label.setText(f"R: {row}, C: {col}")
+
+    def _update_stats(self):
+        """Aggiorna le statistiche nella status bar."""
+        text = self.editor.toPlainText()
+        lines = text.split('\n')
+        practice_count = sum(1 for l in lines if l.startswith('# '))
+        task_lines = [l for l in lines if l.strip().startswith('- ')]
+        task_count = len(task_lines)
+        open_count = sum(1 for l in task_lines if not l.strip().startswith('- [x]'))
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_count = sum(1 for l in lines if today_str in l)
+        self.stats_label.setText(
+            f"Pratiche: {practice_count} | Task: {task_count} ({open_count} aperti, {today_count} oggi)"
+        )
+
     def _setup_toolbar(self):
         self.toolbar = QToolBar()
         self.toolbar.setMovable(False)
         self.addToolBar(self.toolbar)
         self.open_action = QAction("📂 Apri", self)
-        self.open_action.setShortcut(QKeySequence.Open)
+        self.open_action.setShortcut(QKeySequence.Open) # type: ignore
         self.toolbar.addAction(self.open_action)
         self.toolbar.addSeparator()
         self.filter_frame = QFrame()
@@ -147,6 +177,7 @@ class PracticeWorkspace(QMainWindow):
         self.open_action.triggered.connect(self._open_workspace)
         self.save_action.triggered.connect(self._save_document)
         self.theme_btn.clicked.connect(self._cycle_theme)
+        self.editor.cursorPositionChanged.connect(self._update_cursor_position)
         self.editor.practiceClicked.connect(self._on_practice_name_clicked)
         self.editor.fileClicked.connect(self._open_file)
         self.editor.autocompleteRequested.connect(self._show_autocomplete)
@@ -238,6 +269,7 @@ class PracticeWorkspace(QMainWindow):
             self.editor.last_saved_content = raw_content
             self._update_modified_indicator()
             self._do_refresh_tree()
+            self._update_stats()
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile caricare il documento: {e}")
 
@@ -519,6 +551,8 @@ class PracticeWorkspace(QMainWindow):
             self._add_task_to_tree(child, task_item, practice_files)
         if task_node.children:
             task_item.setExpanded(True)
+
+        self._update_stats()
 
     def _create_file_item(self, filename: str, practice_name: str) -> Optional[QTreeWidgetItem]:
         if not self.workspace_path:
