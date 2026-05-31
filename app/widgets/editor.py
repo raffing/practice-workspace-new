@@ -5,6 +5,9 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QTextCursor, QFont, QFontDatabase
 from app.highlighter import MarkdownHighlighter
 from app.parser import DocumentParser
+from PySide6.QtGui import QPainter, QColor, QFont, QFontDatabase
+from PySide6.QtCore import Qt, Signal, QTimer, QRect
+from app.widgets.line_number_area import LineNumberArea
 
 class PracticeEditor(QTextEdit):
     practiceClicked = Signal(str)
@@ -26,6 +29,11 @@ class PracticeEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_font()
+        self.line_number_area = LineNumberArea(self)
+        self.document().blockCountChanged.connect(self.update_line_number_area_width)
+        self.verticalScrollBar().valueChanged.connect(self.update_line_number_area_scroll)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+        self.update_line_number_area_width(0)
         self.setTabStopDistance(40)
         self.setAcceptRichText(False)
         self.setLineWrapMode(QTextEdit.WidgetWidth)
@@ -46,6 +54,57 @@ class PracticeEditor(QTextEdit):
         font.setPointSize(11)
         font.setStyleHint(QFont.Monospace)
         self.setFont(font)
+    
+    def line_number_area_width(self):
+        digits = len(str(max(1, self.document().blockCount())))
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_line_number_area_scroll(self, value):
+        self.line_number_area.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+
+    def line_number_area_paint_event(self, event):
+        painter = QPainter(self.line_number_area)
+        
+        # Sfondo
+        if self.palette().window().color().lightness() > 128:
+            painter.fillRect(event.rect(), QColor("#F5F5F5"))
+            painter.setPen(QColor("#999999"))
+        else:
+            painter.fillRect(event.rect(), QColor("#2D2D2D"))
+            painter.setPen(QColor("#666666"))
+        
+        block = self.document().begin()
+        block_number = 0
+        
+        while block.isValid():
+            block_cursor = QTextCursor(block)
+            rect = self.cursorRect(block_cursor)
+            
+            if rect.bottom() >= event.rect().top() and rect.top() <= event.rect().bottom():
+                if block.isVisible():
+                    number = str(block_number + 1)
+                    painter.drawText(
+                        0, rect.top(),
+                        self.line_number_area.width() - 5,
+                        self.fontMetrics().height(),
+                        Qt.AlignRight, number
+                    )
+            
+            block = block.next()
+            block_number += 1
+
+    def highlight_current_line(self):
+        # Semplice: non facciamo highlight per ora, QTextEdit non lo supporta bene
+        pass
     
     def update_theme(self, theme: Dict):
         self.setStyleSheet(f"""
