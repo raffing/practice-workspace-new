@@ -213,27 +213,70 @@ class PracticeEditor(QTextEdit):
             self.documentChanged.emit()
     
     def _move_line(self, direction: int):
+        """Sposta la riga corrente su/giù scambiandola con quella adiacente."""
         cursor = self.textCursor()
         block = cursor.block()
+        
         if direction < 0:
+            # Sposta su: scambia con la riga precedente
             prev_block = block.previous()
             if not prev_block.isValid():
                 return
+            
+            # Prendi il testo della riga corrente
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+            current_text = cursor.selectedText()
+            
+            # Prendi il testo della riga precedente
+            prev_cursor = QTextCursor(prev_block)
+            prev_cursor.movePosition(QTextCursor.StartOfBlock)
+            prev_cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+            prev_text = prev_cursor.selectedText()
+            
+            # Rimuovi entrambe e reinserisci scambiate
+            cursor.removeSelectedText()
+            prev_cursor.removeSelectedText()
+            
+            # Inserisci prima la corrente (ora sopra), poi la precedente
+            insert_cursor = QTextCursor(prev_block)
+            insert_cursor.movePosition(QTextCursor.StartOfBlock)
+            insert_cursor.insertText(current_text)
+            insert_cursor.insertText(prev_text)
+            
+            # Riposiziona il cursore sulla riga spostata
+            self.setTextCursor(QTextCursor(prev_block))
+        
         else:
+            # Sposta giù: scambia con la riga successiva
             next_block = block.next()
             if not next_block.isValid():
                 return
-        cursor.movePosition(QTextCursor.StartOfBlock)
-        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
-        current_line = cursor.selectedText() + '\n'
-        cursor.removeSelectedText()
-        if direction < 0:
-            insert_cursor = QTextCursor(block.previous())
+            
+            # Prendi il testo della riga corrente
+            cursor.movePosition(QTextCursor.StartOfBlock)
+            cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+            current_text = cursor.selectedText()
+            
+            # Prendi il testo della riga successiva
+            next_cursor = QTextCursor(next_block)
+            next_cursor.movePosition(QTextCursor.StartOfBlock)
+            next_cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+            next_text = next_cursor.selectedText()
+            
+            # Rimuovi entrambe e reinserisci scambiate
+            next_cursor.removeSelectedText()
+            cursor.removeSelectedText()
+            
+            # Inserisci prima la successiva (ora sopra), poi la corrente
+            insert_cursor = QTextCursor(block)
             insert_cursor.movePosition(QTextCursor.StartOfBlock)
-        else:
-            insert_cursor = QTextCursor(block.next())
-            insert_cursor.movePosition(QTextCursor.EndOfBlock)
-        insert_cursor.insertText('\n' + current_line.rstrip('\n'))
+            insert_cursor.insertText(next_text)
+            insert_cursor.insertText(current_text)
+            
+            # Riposiziona il cursore
+            self.setTextCursor(QTextCursor(next_block))
+        
         self.documentChanged.emit()
     
     def _indent_selection(self, direction: int):
