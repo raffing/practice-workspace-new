@@ -229,10 +229,10 @@ class PracticeWorkspace(QMainWindow):
         try:
             raw_content = file_path.read_text(encoding='utf-8')
             self.practice_paths = dict(
-                re.findall(r'^# \[([^\]]+)\]\(([^)]+)\)', raw_content, re.MULTILINE)
+                re.findall(r'^# \[(.+?)\]\((.+)\)$', raw_content, re.MULTILINE)
             )
             clean_content = re.sub(
-                r'^# \[([^\]]+)\]\([^)]+\)', r'# \1', raw_content, flags=re.MULTILINE
+                r'^# \[(.+?)\]\(.+\)$', r'# \1', raw_content, flags=re.MULTILINE
             )
             self.editor.setPlainText(clean_content)
             self.editor.last_saved_content = raw_content
@@ -248,17 +248,46 @@ class PracticeWorkspace(QMainWindow):
         try:
             clean_text = self.editor.toPlainText()
             lines = clean_text.split('\n')
+            
+            # Raccogli i nomi attuali delle pratiche nell'editor
+            current_names = []
+            for line in lines:
+                if line.startswith('# '):
+                    current_names.append(line[2:].strip())
+            
+            # Trova i vecchi nomi che non esistono più (rinominati)
+            old_orphans = {k: v for k, v in self.practice_paths.items() if k not in current_names}
+            
+            # Nuovo dizionario
+            new_practice_paths = {}
+            
+            for name in current_names:
+                if name in self.practice_paths:
+                    # Nome invariato, mantieni path
+                    new_practice_paths[name] = self.practice_paths[name]
+            
+            # SOLO se c'è ESATTAMENTE un orfano e ESATTAMENTE un nuovo nome senza path,
+            # allora è una rinomina e trasferiamo il path
+            new_without_path = [n for n in current_names if n not in self.practice_paths]
+            if len(old_orphans) == 1 and len(new_without_path) == 1:
+                old_name, old_path = list(old_orphans.items())[0]
+                new_name = new_without_path[0]
+                new_practice_paths[new_name] = old_path
+            
+            self.practice_paths = new_practice_paths
+            
+            # Scrivi il file
             new_lines = []
             for line in lines:
                 if line.startswith('# '):
                     name = line[2:].strip()
                     if name in self.practice_paths:
-                        rel_path = self.practice_paths[name]
-                        new_lines.append(f'# [{name}]({rel_path})')
+                        new_lines.append(f'# [{name}]({self.practice_paths[name]})')
                     else:
                         new_lines.append(line)
                 else:
                     new_lines.append(line)
+            
             content_with_paths = '\n'.join(new_lines)
             agenda_file.write_text(content_with_paths, encoding='utf-8')
             self.editor.last_saved_content = content_with_paths
@@ -328,7 +357,30 @@ class PracticeWorkspace(QMainWindow):
                            f"Il file '{clean_filename}' non è stato trovato in '{practice_dir}'.")
 
     def _on_practice_name_clicked(self, practice_name: str):
-        self._open_practice_folder(practice_name)
+        """Click sul nome pratica nell'editor."""
+        # 1. Cerca direttamente nel dizionario
+        if practice_name in self.practice_paths:
+            self._open_practice_folder(practice_name)
+            return
+        
+        # 2. Se non trovato, cerca se è una pratica rinominata (non ancora salvata)
+        text = self.editor.toPlainText()
+        current_names = set()
+        for line in text.split('\n'):
+            if line.startswith('# '):
+                current_names.add(line[2:].strip())
+        
+        if practice_name in current_names:
+            for old_name, old_path in list(self.practice_paths.items()):
+                if old_name not in current_names:
+                    # Trasferisci il path al nuovo nome
+                    self.practice_paths[practice_name] = old_path
+                    del self.practice_paths[old_name]
+                    self._open_practice_folder(practice_name)
+                    return
+        
+        # 3. Nessun path trovato
+        self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
 
     # ========================================================================
     # TREE WIDGET
