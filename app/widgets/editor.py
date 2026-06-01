@@ -250,9 +250,10 @@ class PracticeEditor(QTextEdit):
             elif event.key() == Qt.Key_Down:
                 self._move_line(1)
                 return
-            elif event.key() == Qt.Key_F:           
-                self._toggle_fold_current()         
-                return 
+            elif event.key() == Qt.Key_O:
+                self._toggle_fold_current()
+                return
+
         if event.modifiers() == Qt.ControlModifier:
             if event.key() == Qt.Key_D:
                 self._toggle_task_done()
@@ -273,6 +274,9 @@ class PracticeEditor(QTextEdit):
             elif event.key() == Qt.Key_G:
                 self._show_goto_line()
                 return
+            elif event.key() == Qt.Key_O:
+                self._toggle_fold_current()
+                return
 
         if event.key() == Qt.Key_F5:
             self.f5Pressed.emit()
@@ -290,18 +294,30 @@ class PracticeEditor(QTextEdit):
             return
 
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            # Se la riga ha solo "-" o "- " senza testo, rimuovi il trattino e vai a capo
+            if text.strip() in ('-', '- '):
+                cursor.movePosition(QTextCursor.StartOfBlock)
+                cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                cursor.insertText('')
+                super().keyPressEvent(event)
+                return
+
             if self._practice_line_pattern.match(text):
                 practice_name = text[2:].strip()
                 super().keyPressEvent(event)
                 self.textCursor().insertText("- ")
                 QTimer.singleShot(50, lambda name=practice_name: self.practiceRenamed.emit("", name))
                 return
+
             task_match = self._task_indent_pattern.match(text)
             if task_match:
                 indent = task_match.group(1)
                 super().keyPressEvent(event)
                 self.textCursor().insertText(f"{indent}- ")
                 return
+
+            super().keyPressEvent(event)
+            return
 
         if event.key() == Qt.Key_Tab:
             if cursor.hasSelection():
@@ -326,11 +342,13 @@ class PracticeEditor(QTextEdit):
                 return
 
         super().keyPressEvent(event)
+        
         if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space, Qt.Key_Backspace, Qt.Key_Delete) or event.text().isprintable():
             QTimer.singleShot(50, self._check_practice_rename)
 
         if not self.autocomplete_active:
             QTimer.singleShot(100, lambda: self.documentChanged.emit())
+
 
     def _check_practice_rename(self):
         """Rileva se una pratica è stata rinominata."""
@@ -361,6 +379,18 @@ class PracticeEditor(QTextEdit):
                 background-color: palette(window);
                 border-top: 1px solid palette(mid);
             }
+            QPushButton {
+                border: 1px solid #999;
+                border-radius: 4px;
+                padding: 4px 8px;
+                background-color: #f0f0f0;
+                color: #333;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+                border-color: #666;
+            }
         """)
         layout = QHBoxLayout(self._search_bar)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -373,16 +403,18 @@ class PracticeEditor(QTextEdit):
         layout.addWidget(self._search_input)
 
         self._search_count = QLabel("")
-        self._search_count.setStyleSheet("padding: 0 8px;")
+        self._search_count.setStyleSheet("padding: 0 8px; color: #666;")
         layout.addWidget(self._search_count)
 
-        prev_btn = QPushButton("↑")
-        prev_btn.setFixedSize(28, 28)
+        prev_btn = QPushButton("▲")
+        prev_btn.setFixedSize(30, 30)
+        prev_btn.setToolTip("Precedente (Shift+F3)")
         prev_btn.clicked.connect(self._find_prev)
         layout.addWidget(prev_btn)
 
-        next_btn = QPushButton("↓")
-        next_btn.setFixedSize(28, 28)
+        next_btn = QPushButton("▼")
+        next_btn.setFixedSize(30, 30)
+        next_btn.setToolTip("Successivo (F3)")
         next_btn.clicked.connect(self._find_next)
         layout.addWidget(next_btn)
 
@@ -391,24 +423,30 @@ class PracticeEditor(QTextEdit):
         self._replace_input.setVisible(replace)
         layout.addWidget(self._replace_input)
 
-        replace_btn = QPushButton("Sostituisci")
+        replace_btn = QPushButton("↻")
+        replace_btn.setFixedSize(30, 30)
+        replace_btn.setToolTip("Sostituisci")
         replace_btn.setVisible(replace)
         replace_btn.clicked.connect(self._replace_current)
         layout.addWidget(replace_btn)
 
-        replace_all_btn = QPushButton("Tutti")
+        replace_all_btn = QPushButton("↻↻")
+        replace_all_btn.setFixedSize(36, 30)
+        replace_all_btn.setToolTip("Sostituisci tutti")
         replace_all_btn.setVisible(replace)
         replace_all_btn.clicked.connect(self._replace_all)
         layout.addWidget(replace_all_btn)
 
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(28, 28)
+        close_btn.setFixedSize(30, 30)
+        close_btn.setToolTip("Chiudi (Esc)")
         close_btn.clicked.connect(self._hide_search_bar)
         layout.addWidget(close_btn)
 
         self._search_bar.setGeometry(0, self.height() - 40, self.width(), 40)
         self._search_bar.show()
         self._search_input.setFocus()
+
 
     def _hide_search_bar(self):
         if self._search_bar:

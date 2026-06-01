@@ -178,6 +178,9 @@ class PracticeWorkspace(QMainWindow):
         file_menu = self.menuBar().addMenu("📁 File")
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
+        open_external_action = QAction("📄 Apri Agenda.md (esterno)", self)
+        open_external_action.triggered.connect(self._open_agenda_external)
+        file_menu.addAction(open_external_action)
         edit_menu = self.menuBar().addMenu("✏️ Modifica")
         undo_action = QAction("Undo", self)
         undo_action.setShortcut(QKeySequence.Undo)
@@ -221,6 +224,20 @@ class PracticeWorkspace(QMainWindow):
         history_shortcut.setShortcut(QKeySequence("Ctrl+Shift+H"))
         history_shortcut.triggered.connect(self._show_history)
         self.addAction(history_shortcut)
+
+        format_shortcut = QAction("Formatta testo", self)
+        format_shortcut.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        format_shortcut.triggered.connect(self._format_document)
+        self.addAction(format_shortcut)
+
+    def _open_agenda_external(self):
+        """Apre Agenda.md con l'applicazione predefinita di sistema."""
+        if not self.workspace_path:
+            return
+        agenda_file = self.workspace_path / "Agenda.md"
+        if agenda_file.exists():
+            os.startfile(str(agenda_file))
+            self.status_bar.showMessage("Agenda.md aperto con app predefinita", 3000)
 
     # ========================================================================
     # THEME
@@ -450,6 +467,41 @@ class PracticeWorkspace(QMainWindow):
         else:
             self._autosave_timer.stop()
             self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
+
+    def _format_document(self):
+        """Pulisce la formattazione del documento."""
+        text = self.editor.toPlainText()
+        lines = text.split('\n')
+        new_lines = []
+        
+        for line in lines:
+            if line.strip():
+                # Rimuovi spazi multipli
+                cleaned = re.sub(r'  +', ' ', line)
+                # Assicura indentazione multipla di 2
+                if cleaned.startswith(' '):
+                    indent = len(cleaned) - len(cleaned.lstrip())
+                    indent = (indent // 2) * 2
+                    cleaned = ' ' * indent + cleaned.lstrip()
+                new_lines.append(cleaned)
+            else:
+                new_lines.append('')
+        
+        # Rimuovi righe vuote multiple (massimo 1 consecutiva)
+        result = []
+        prev_empty = False
+        for line in new_lines:
+            if line == '':
+                if not prev_empty:
+                    result.append(line)
+                prev_empty = True
+            else:
+                result.append(line)
+                prev_empty = False
+        
+        self.editor.setPlainText('\n'.join(result))
+        self.status_bar.showMessage("Documento formattato", 3000)
+
     # ========================================================================
     # PRACTICE & FILE OPENING
     # ========================================================================
@@ -477,28 +529,73 @@ class PracticeWorkspace(QMainWindow):
         return None
 
     def _open_file(self, filename: str):
+        """Apre il file o la cartella nella pratica corrente."""
         if not self.workspace_path:
             return
+        
         clean_filename = filename.strip("'\"")
         practice_name = self.editor.get_current_practice_name()
+        
         if not practice_name or practice_name not in self.practice_paths:
-            QMessageBox.warning(self, "File non trovato",
-                               f"Nessun path associato alla pratica '{practice_name}'.")
+            QMessageBox.warning(self, "Non trovato",
+                            f"Nessun path associato alla pratica '{practice_name}'.")
             return
+        
         practice_dir = self.workspace_path / self.practice_paths[practice_name]
-        file_path = practice_dir / clean_filename
-        if file_path.is_file():
-            os.startfile(str(file_path))
+        target_path = practice_dir / clean_filename
+        
+        if target_path.is_dir():
+            os.startfile(str(target_path))
+            self.status_bar.showMessage(f"Aperta cartella: {clean_filename}", 3000)
+            return
+        
+        if target_path.is_file():
+            os.startfile(str(target_path))
             self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
             return
+        
         for f in practice_dir.rglob(clean_filename):
             if f.is_file():
                 os.startfile(str(f))
                 self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
                 return
-        QMessageBox.warning(self, "File non trovato",
-                           f"Il file '{clean_filename}' non è stato trovato in '{practice_dir}'.")
-
+        
+        QMessageBox.warning(self, "Non trovato",
+                        f"'{clean_filename}' non è stato trovato in '{practice_dir}'.")
+    
+        """Apre il file o la cartella nella pratica corrente."""
+        if not self.workspace_path:
+            return
+        
+        clean_filename = filename.strip("'\"")
+        practice_name = self.editor.get_current_practice_name()
+        
+        if not practice_name or practice_name not in self.practice_paths:
+            QMessageBox.warning(self, "Non trovato",
+                            f"Nessun path associato alla pratica '{practice_name}'.")
+            return
+        
+        practice_dir = self.workspace_path / self.practice_paths[practice_name]
+        target_path = practice_dir / clean_filename
+        
+        if target_path.is_dir():
+            os.startfile(str(target_path))
+            self.status_bar.showMessage(f"Aperta cartella: {clean_filename}", 3000)
+            return
+        
+        if target_path.is_file():
+            os.startfile(str(target_path))
+            self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
+            return
+        
+        for f in practice_dir.rglob(clean_filename):
+            if f.is_file():
+                os.startfile(str(f))
+                self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
+                return
+        
+        QMessageBox.warning(self, "Non trovato",
+                        f"'{clean_filename}' non è stato trovato in '{practice_dir}'.")
     def _on_practice_name_clicked(self, practice_name: str):
         """Click sul nome pratica nell'editor."""
         if practice_name in self.practice_paths:
@@ -530,7 +627,7 @@ class PracticeWorkspace(QMainWindow):
         root_item.setFont(0, font)
         self.tree_widget.addTopLevelItem(root_item)
         self._populate_tree_folder(root_item, self.workspace_path)
-        root_item.setExpanded(True)
+        root_item.setExpanded(False)
 
         # Sezione pratiche da Agenda
         text = self.editor.toPlainText()
