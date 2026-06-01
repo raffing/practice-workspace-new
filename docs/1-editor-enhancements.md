@@ -14,7 +14,7 @@
 
 ## Sessione 2
 
-- [ ] Find/Replace nell'editor (Ctrl+F / Ctrl+H)
+- [x] Find/Replace nell'editor (Ctrl+F / Ctrl+H)
 - [ ] Vai alla riga (Ctrl+G)
 - [ ] Cronologia modifiche con diff (Ctrl+Shift+H)
 

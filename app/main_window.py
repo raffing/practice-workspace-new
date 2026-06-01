@@ -196,7 +196,6 @@ class PracticeWorkspace(QMainWindow):
         self.editor.fileClicked.connect(self._open_file)
         self.editor.autocompleteRequested.connect(self._show_autocomplete)
         self.editor.documentChanged.connect(self._on_document_changed)
-        self.editor.ctrlFPressed.connect(lambda: self.filter_edit.setFocus())
         self.editor.ctrlEPressed.connect(lambda: self.editor.setFocus())
         self.editor.ctrlNPressed.connect(self._new_practice_dialog)
         self.editor.f5Pressed.connect(self._do_refresh_tree)
