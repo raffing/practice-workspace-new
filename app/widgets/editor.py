@@ -77,11 +77,11 @@ class PracticeEditor(QTextEdit):
 
     def line_number_area_width(self):
         digits = len(str(max(1, self.document().blockCount())))
-        space = 30 + self.fontMetrics().horizontalAdvance('9') * digits
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
         return space
 
     def update_line_number_area_width(self, _):
-        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+        self.setViewportMargins(self.line_number_area_width() + 10, 0, 0, 0)
 
     def update_line_number_area_scroll(self, value):
         self.line_number_area.update()
@@ -90,26 +90,23 @@ class PracticeEditor(QTextEdit):
         super().resizeEvent(event)
         cr = self.contentsRect()
         self.line_number_area.setGeometry(
-            QRect(cr.left(), cr.top(), self.line_number_area_width() + 20, cr.height())
+            QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
         )
         if self._search_bar and self._search_bar.isVisible():
             self._search_bar.setGeometry(0, self.height() - 40, self.width(), 40)
-
+    
     def line_number_area_paint_event(self, event):
         painter = QPainter(self.line_number_area)
 
         if self.palette().window().color().lightness() > 128:
             painter.fillRect(event.rect(), QColor("#F5F5F5"))
             painter.setPen(QColor("#999999"))
-            fold_color = QColor("#666666")
         else:
             painter.fillRect(event.rect(), QColor("#2D2D2D"))
             painter.setPen(QColor("#666666"))
-            fold_color = QColor("#999999")
 
         block = self.document().begin()
         block_number = 0
-        self._fold_markers.clear()
 
         while block.isValid():
             block_cursor = QTextCursor(block)
@@ -119,51 +116,19 @@ class PracticeEditor(QTextEdit):
                 if block.isVisible():
                     number = str(block_number + 1)
                     painter.drawText(
-                        20, rect.top(),
-                        self.line_number_area.width() - 25,
+                        0, rect.top(),
+                        self.line_number_area.width() - 5,
                         self.fontMetrics().height(),
                         Qt.AlignRight, number
                     )
-
-                    text = block.text().strip()
-                    if text.startswith('- ') and not text.startswith('- [x]'):
-                        raw_text = block.text()
-                        indent = len(raw_text) - len(raw_text.lstrip())
-
-                        next_block = block.next()
-                        has_children = False
-                        while next_block.isValid():
-                            next_text = next_block.text()
-                            if next_text.strip():
-                                next_indent = len(next_text) - len(next_text.lstrip())
-                                if next_indent > indent:
-                                    has_children = True
-                                    break
-                                if next_indent <= indent:
-                                    break
-                            next_block = next_block.next()
-
-                        if has_children:
-                            is_folded = block_number in self._folded_blocks
-                            triangle = QRect(5, rect.top() + 4, 12, 12)
-                            self._fold_markers[block_number] = triangle
-                            painter.setPen(fold_color)
-                            painter.drawText(
-                                triangle,
-                                Qt.AlignCenter,
-                                "▶" if is_folded else "▼",
-                            )
-
             block = block.next()
             block_number += 1
 
     def line_number_area_mouse_press(self, event):
-        """Gestisce il click sui triangolini di folding."""
         for block_number, rect in self._fold_markers.items():
             if rect.contains(event.pos()):
                 self._toggle_fold(block_number)
                 return
-        super().mousePressEvent(event)
 
     def _toggle_fold(self, block_number: int):
         """Piega o espandi un task e i suoi figli."""
@@ -236,10 +201,6 @@ class PracticeEditor(QTextEdit):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if event.position().x() < self.line_number_area_width():
-                self.line_number_area_mouse_press(event)
-                return
-
             pos = event.position().toPoint()
             cursor = self.cursorForPosition(pos)
             block = cursor.block()
@@ -251,6 +212,7 @@ class PracticeEditor(QTextEdit):
                 self.fileClicked.emit(value)
                 return
         super().mousePressEvent(event)
+
 
     def get_current_practice_name(self) -> str:
         cursor = self.textCursor()
@@ -288,7 +250,9 @@ class PracticeEditor(QTextEdit):
             elif event.key() == Qt.Key_Down:
                 self._move_line(1)
                 return
-
+            elif event.key() == Qt.Key_F:           
+                self._toggle_fold_current()         
+                return 
         if event.modifiers() == Qt.ControlModifier:
             if event.key() == Qt.Key_D:
                 self._toggle_task_done()
@@ -641,3 +605,53 @@ class PracticeEditor(QTextEdit):
                 self.setTextCursor(cursor)
                 self.setFocus()
                 self.ensureCursorVisible()
+    def _toggle_fold_current(self):
+        """Piega/espandi la pratica o il task corrente con Ctrl+Shift+F."""
+        cursor = self.textCursor()
+        block = cursor.block()
+        text = block.text().strip()
+        
+        if text.startswith('# '):
+            # Folding pratica: piega tutti i task fino alla prossima pratica
+            block_number = block.blockNumber()
+            
+            if block_number in self._folded_blocks:
+                self._folded_blocks.remove(block_number)
+                visible = True
+            else:
+                self._folded_blocks.add(block_number)
+                visible = False
+            
+            next_block = block.next()
+            while next_block.isValid():
+                next_text = next_block.text().strip()
+                if next_text.startswith('# '):
+                    break
+                next_block.setVisible(visible)
+                next_block = next_block.next()
+        
+        elif text.startswith('- '):
+            # Folding task: piega i sotto-task
+            block_number = block.blockNumber()
+            raw_text = block.text()
+            indent = len(raw_text) - len(raw_text.lstrip())
+            
+            if block_number in self._folded_blocks:
+                self._folded_blocks.remove(block_number)
+                visible = True
+            else:
+                self._folded_blocks.add(block_number)
+                visible = False
+            
+            next_block = block.next()
+            while next_block.isValid():
+                next_text = next_block.text()
+                if next_text.strip():
+                    next_indent = len(next_text) - len(next_text.lstrip())
+                    if next_indent <= indent:
+                        break
+                next_block.setVisible(visible)
+                next_block = next_block.next()
+        
+        self.line_number_area.update()
+        self.viewport().update()
