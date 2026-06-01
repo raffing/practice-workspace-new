@@ -178,11 +178,20 @@ class PracticeEditor(QTextEdit):
         self.highlighter.update_theme(theme)
 
     def _get_link_info(self, text, pos_in_block):
+        # Supporta sia @file che @[file](path)
+        # Ma l'editor mostra solo @file dopo la pulizia in _load_document
         if text.startswith('# '):
             name = text[2:].strip()
             if 2 <= pos_in_block < 2 + len(name):
                 return ('practice', name)
             return (None, None)
+        
+        # Pattern per @[file](path)
+        det_pattern = re.compile(r'@\[([^\]]+)\]\([^)]+\)')
+        for match in det_pattern.finditer(text):
+            if match.start() <= pos_in_block < match.end():
+                return ('file', match.group(1))
+
         for match in self._quoted_file_pattern.finditer(text):
             if match.start() <= pos_in_block < match.end():
                 return ('file', match.group(1))

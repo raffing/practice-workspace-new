@@ -285,10 +285,15 @@ class PracticeWorkspace(QMainWindow):
         try:
             raw_content = file_path.read_text(encoding='utf-8')
             self.practice_paths = dict(
-                re.findall(r'^# \[(.+?)\]\((.+)\)$', raw_content, re.MULTILINE)
+                re.findall(r'^# \[([^\]]+)\]\(([^)]+)\)', raw_content, re.MULTILINE)
             )
+            # Pulisci anche i file con path: @[nome](path) -> @nome
             clean_content = re.sub(
-                r'^# \[(.+?)\]\(.+\)$', r'# \1', raw_content, flags=re.MULTILINE
+                r'@\[([^\]]+)\]\([^)]+\)', r'@\1', raw_content, flags=re.MULTILINE
+            )
+            # Pulisci i path delle pratiche
+            clean_content = re.sub(
+                r'^# \[([^\]]+)\]\([^)]+\)', r'# \1', clean_content, flags=re.MULTILINE
             )
             self.editor.setPlainText(clean_content)
             self.editor.last_saved_content = raw_content
@@ -353,15 +358,22 @@ class PracticeWorkspace(QMainWindow):
             lines = clean_text.split('\n')
             
             new_lines = []
+            current_practice_path = None
+            
             for line in lines:
                 if line.startswith('# '):
                     name = line[2:].strip()
-                    # Solo se è già nel dizionario, scrivi con path
                     if name in self.practice_paths:
-                        new_lines.append(f'# [{name}]({self.practice_paths[name]})')
+                        current_practice_path = self.practice_paths[name]
+                        new_lines.append(f'# [{name}]({current_practice_path})')
                     else:
+                        current_practice_path = None
                         new_lines.append(line)
                 else:
+                    # Sostituisci i riferimenti @file con @[file](path) se il file esiste
+                    if current_practice_path:
+                        practice_dir = self.workspace_path / current_practice_path
+                        line = self._resolve_file_links(line, practice_dir)
                     new_lines.append(line)
             
             content_with_paths = '\n'.join(new_lines)
@@ -381,6 +393,31 @@ class PracticeWorkspace(QMainWindow):
             self.status_bar.showMessage("Documento salvato", 3000)
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile salvare il documento: {e}")
+
+    def _resolve_file_links(self, line: str, practice_dir: Path) -> str:
+        """Sostituisce @nomefile con @[nomefile](path/relativo) se il file esiste."""
+        import re
+        # Pattern per @nomefile (con o senza apici)
+        pattern = re.compile(r"""@(?:'([^']+)'|"([^"]+)"|(\S+))""")
+        
+        def replace_match(match):
+            filename = match.group(1) or match.group(2) or match.group(3)
+            if not filename:
+                return match.group(0)
+            
+            # Cerca il file nella directory della pratica
+            file_path = practice_dir / filename
+            if file_path.exists():
+                try:
+                    rel = file_path.relative_to(self.workspace_path)
+                    rel_str = str(rel).replace('\\', '/')
+                    return f"@[{filename}]({rel_str})"
+                except ValueError:
+                    pass
+            # File non trovato, lascia com'è
+            return match.group(0)
+        
+        return pattern.sub(replace_match, line)
 
     def _on_practice_renamed(self, old_name, new_name):
         """Aggiorna il dizionario quando una pratica viene rinominata."""
@@ -508,73 +545,33 @@ class PracticeWorkspace(QMainWindow):
         return None
 
     def _open_file(self, filename: str):
-        """Apre il file o la cartella nella pratica corrente."""
+        """Apre il file o la cartella. Se ha un path salvato lo usa direttamente."""
         if not self.workspace_path:
             return
         
         clean_filename = filename.strip("'\"")
+        
+        # Se il filename contiene già un path (formato @[nome](path)), estrailo
+        # Ma l'editor lo pulisce, quindi qui arriva solo il nome.
+        # Cerchiamo nel testo originale per vedere se c'è un path salvato.
         practice_name = self.editor.get_current_practice_name()
         
-        if not practice_name or practice_name not in self.practice_paths:
-            QMessageBox.warning(self, "Non trovato",
-                            f"Nessun path associato alla pratica '{practice_name}'.")
-            return
-        
-        practice_dir = self.workspace_path / self.practice_paths[practice_name]
-        target_path = practice_dir / clean_filename
-        
-        if target_path.is_dir():
-            os.startfile(str(target_path))
-            self.status_bar.showMessage(f"Aperta cartella: {clean_filename}", 3000)
-            return
-        
-        if target_path.is_file():
-            os.startfile(str(target_path))
-            self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
-            return
-        
-        for f in practice_dir.rglob(clean_filename):
-            if f.is_file():
-                os.startfile(str(f))
+        if practice_name and practice_name in self.practice_paths:
+            practice_dir = self.workspace_path / self.practice_paths[practice_name]
+            target = practice_dir / clean_filename
+            if target.exists():
+                os.startfile(str(target))
                 self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
                 return
+            # Cerca nei sottodirectory
+            for f in practice_dir.rglob(clean_filename):
+                if f.is_file() or f.is_dir():
+                    os.startfile(str(f))
+                    self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
+                    return
         
-        QMessageBox.warning(self, "Non trovato",
-                        f"'{clean_filename}' non è stato trovato in '{practice_dir}'.")
-    
-        """Apre il file o la cartella nella pratica corrente."""
-        if not self.workspace_path:
-            return
-        
-        clean_filename = filename.strip("'\"")
-        practice_name = self.editor.get_current_practice_name()
-        
-        if not practice_name or practice_name not in self.practice_paths:
-            QMessageBox.warning(self, "Non trovato",
-                            f"Nessun path associato alla pratica '{practice_name}'.")
-            return
-        
-        practice_dir = self.workspace_path / self.practice_paths[practice_name]
-        target_path = practice_dir / clean_filename
-        
-        if target_path.is_dir():
-            os.startfile(str(target_path))
-            self.status_bar.showMessage(f"Aperta cartella: {clean_filename}", 3000)
-            return
-        
-        if target_path.is_file():
-            os.startfile(str(target_path))
-            self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
-            return
-        
-        for f in practice_dir.rglob(clean_filename):
-            if f.is_file():
-                os.startfile(str(f))
-                self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
-                return
-        
-        QMessageBox.warning(self, "Non trovato",
-                        f"'{clean_filename}' non è stato trovato in '{practice_dir}'.")
+        QMessageBox.warning(self, "File non trovato",
+                           f"Il file '{clean_filename}' non è stato trovato nella pratica corrente.")
     def _on_practice_name_clicked(self, practice_name: str):
         """Click sul nome pratica nell'editor."""
         if practice_name in self.practice_paths:
@@ -891,6 +888,8 @@ class PracticeWorkspace(QMainWindow):
                         pass
                 cursor.insertText(f" {item}\n")
             else:
+                # Quando si seleziona un file dall'autocomplete, inserisci @'nomefile' normalmente. 
+                # Il path verrà aggiunto al salvataggio.
                 item_to_insert = f"'{item}'" if " " in item else item
                 cursor.insertText(f"{prefix}{item_to_insert}\n")
         self.editor.setTextCursor(cursor)
