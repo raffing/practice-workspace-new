@@ -225,13 +225,19 @@ class PracticeWorkspace(QMainWindow):
         self.addAction(task_shortcut)
 
     def _open_agenda_external(self):
-        """Apre Agenda.md con l'applicazione predefinita di sistema."""
+        """Apre Agenda.md con l'applicazione predefinita di sistema o Notepad."""
         if not self.workspace_path:
             return
         agenda_file = self.workspace_path / "Agenda.md"
         if agenda_file.exists():
-            os.startfile(str(agenda_file))
-            self.status_bar.showMessage("Agenda.md aperto con app predefinita", 3000)
+            try:
+                os.startfile(str(agenda_file))
+                self.status_bar.showMessage("Agenda.md aperto con app predefinita", 3000)
+            except OSError:
+                # Se non c'è un'applicazione associata, prova con Notepad
+                import subprocess
+                subprocess.Popen(['notepad.exe', str(agenda_file)])
+                self.status_bar.showMessage("Agenda.md aperto con Notepad", 3000)
 
     # ========================================================================
     # THEME
@@ -529,7 +535,11 @@ class PracticeWorkspace(QMainWindow):
             rel_path = self.practice_paths[practice_name]
             full_path = self.workspace_path / rel_path
             if full_path.is_dir():
-                os.startfile(str(full_path))
+                try:
+                    os.startfile(str(full_path))
+                except OSError:
+                    import subprocess
+                    subprocess.Popen(['explorer.exe', str(full_path)])
                 self.status_bar.showMessage(f"Aperta: {practice_name}", 3000)
                 return True
         self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
@@ -560,13 +570,28 @@ class PracticeWorkspace(QMainWindow):
             practice_dir = self.workspace_path / self.practice_paths[practice_name]
             target = practice_dir / clean_filename
             if target.exists():
-                os.startfile(str(target))
+                try:
+                    os.startfile(str(target))
+                except OSError:
+                    import subprocess
+                    # Se fallisce startfile, prova con explorer per le cartelle o notepad per file ignoti
+                    if target.is_dir():
+                        subprocess.Popen(['explorer.exe', str(target)])
+                    else:
+                        subprocess.Popen(['notepad.exe', str(target)])
                 self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
                 return
             # Cerca nei sottodirectory
             for f in practice_dir.rglob(clean_filename):
                 if f.is_file() or f.is_dir():
-                    os.startfile(str(f))
+                    try:
+                        os.startfile(str(f))
+                    except OSError:
+                        import subprocess
+                        if f.is_dir():
+                            subprocess.Popen(['explorer.exe', str(f)])
+                        else:
+                            subprocess.Popen(['notepad.exe', str(f)])
                     self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
                     return
         
@@ -767,7 +792,15 @@ class PracticeWorkspace(QMainWindow):
         if item_type == 'file':
             filepath = data.get('path')
             if filepath and Path(filepath).exists():
-                os.startfile(filepath)
+                try:
+                    os.startfile(filepath)
+                except OSError:
+                    import subprocess
+                    target = Path(filepath)
+                    if target.is_dir():
+                        subprocess.Popen(['explorer.exe', str(target)])
+                    else:
+                        subprocess.Popen(['notepad.exe', str(target)])
                 self.status_bar.showMessage(f"Aperto: {data.get('filename', '')}", 3000)
             return
         if item_type == 'file_missing':
