@@ -1200,11 +1200,10 @@ class PracticeWorkspace(QMainWindow):
         cursor.movePosition(QTextCursor.StartOfBlock)
         cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
         
-        extra_selections = self.editor.extraSelections()
+        extra_selections = []
         
         selection = QTextEdit.ExtraSelection()
-        selection.format.setBackground(QColor("#FFF3CD"))
-        selection.format.setProperty(QTextEdit.FullWidthSelection, True)
+        selection.format.setBackground(QColor("#FFF3CD"))  # giallo chiaro
         selection.cursor = cursor
         extra_selections.append(selection)
         
