@@ -196,6 +196,7 @@ class PracticeWorkspace(QMainWindow):
         self.editor.fileClicked.connect(self._open_file)
         self.editor.autocompleteRequested.connect(self._show_autocomplete)
         self.editor.documentChanged.connect(self._on_document_changed)
+        self.editor.practiceRenamed.connect(self._on_practice_renamed)
         self.editor.ctrlEPressed.connect(lambda: self.editor.setFocus())
         self.editor.ctrlNPressed.connect(self._new_practice_dialog)
         self.editor.f5Pressed.connect(self._do_refresh_tree)
@@ -363,6 +364,28 @@ class PracticeWorkspace(QMainWindow):
             self.status_bar.showMessage("Documento salvato", 3000)
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile salvare il documento: {e}")
+
+    def _on_practice_renamed(self, old_name, new_name):
+        """Aggiorna il dizionario quando una pratica viene rinominata."""
+        if not new_name:
+            return
+
+        if new_name in self.practice_paths:
+            return
+
+        text = self.editor.toPlainText()
+        current_names = set()
+        for line in text.split('\n'):
+            if line.startswith('# '):
+                current_names.add(line[2:].strip())
+
+        orphans = {k: v for k, v in self.practice_paths.items() if k not in current_names}
+
+        if len(orphans) == 1 and new_name not in self.practice_paths:
+            old, path = list(orphans.items())[0]
+            self.practice_paths[new_name] = path
+            del self.practice_paths[old]
+            self.status_bar.showMessage(f"Path trasferito a '{new_name}'", 2000)
 
     def _on_file_changed(self, path: str):
         if self.workspace_path and path == str(self.workspace_path / "Agenda.md"):

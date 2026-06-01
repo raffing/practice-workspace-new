@@ -23,6 +23,7 @@ class PracticeEditor(QTextEdit):
     fileClicked = Signal(str)
     autocompleteRequested = Signal(str, int, str)
     documentChanged = Signal()
+    practiceRenamed = Signal(str, str)
     ctrlFPressed = Signal()
     ctrlEPressed = Signal()
     ctrlNPressed = Signal()
@@ -243,8 +244,10 @@ class PracticeEditor(QTextEdit):
 
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             if self._practice_line_pattern.match(text):
+                practice_name = text[2:].strip()
                 super().keyPressEvent(event)
                 self.textCursor().insertText("- ")
+                QTimer.singleShot(50, lambda name=practice_name: self.practiceRenamed.emit("", name))
                 return
             task_match = self._task_indent_pattern.match(text)
             if task_match:
@@ -276,8 +279,21 @@ class PracticeEditor(QTextEdit):
                 return
 
         super().keyPressEvent(event)
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space, Qt.Key_Backspace, Qt.Key_Delete) or event.text().isprintable():
+            QTimer.singleShot(50, self._check_practice_rename)
+
         if not self.autocomplete_active:
             QTimer.singleShot(100, lambda: self.documentChanged.emit())
+
+    def _check_practice_rename(self):
+        """Rileva se una pratica è stata rinominata."""
+        cursor = self.textCursor()
+        block = cursor.block()
+        text = block.text().strip()
+
+        if text.startswith('# '):
+            new_name = text[2:].strip()
+            self.practiceRenamed.emit("", new_name)
 
     def _show_search_bar(self, replace=False):
         if self._search_bar:
