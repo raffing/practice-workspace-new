@@ -451,21 +451,25 @@ class PracticeWorkspace(QMainWindow):
 
 
     def _format_document(self):
-        """Pulisce la formattazione del documento."""
+        """Pulisce la formattazione del documento preservando le indentazioni."""
         text = self.editor.toPlainText()
         lines = text.split('\n')
         new_lines = []
         
         for line in lines:
             if line.strip():
-                # Rimuovi spazi multipli
-                cleaned = re.sub(r'  +', ' ', line)
-                # Assicura indentazione multipla di 2
-                if cleaned.startswith(' '):
-                    indent = len(cleaned) - len(cleaned.lstrip())
-                    indent = (indent // 2) * 2
-                    cleaned = ' ' * indent + cleaned.lstrip()
-                new_lines.append(cleaned)
+                # Separa indentazione dal contenuto
+                stripped = line.lstrip()
+                indent = len(line) - len(stripped)
+                
+                # Normalizza indentazione a multipli di 2
+                indent = (indent // 2) * 2
+                
+                # Rimuovi spazi multipli nel contenuto
+                cleaned = re.sub(r'  +', ' ', stripped)
+                
+                # Ricostruisci la linea
+                new_lines.append(' ' * indent + cleaned)
             else:
                 new_lines.append('')
         
