@@ -70,28 +70,46 @@ class PracticeWorkspace(QMainWindow):
         main_layout.setSpacing(0)
         self._setup_toolbar()
         splitter = QSplitter(Qt.Horizontal) # type: ignore
+        
+        # Pannello sinistro con barra di ricerca + albero
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        
+        self.tree_search = QLineEdit()
+        self.tree_search.setPlaceholderText("🔍 Filtra albero...")
+        self.tree_search.setStyleSheet("""
+            QLineEdit {
+                border: none;
+                border-bottom: 1px solid palette(mid);
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+        """)
+        left_layout.addWidget(self.tree_search)
+        
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderLabels(["Workspace"])
         self.tree_widget.setMinimumWidth(300)
-        splitter.addWidget(self.tree_widget)
+        left_layout.addWidget(self.tree_widget)
+        
+        splitter.addWidget(left_panel)
         self.editor = PracticeEditor()
         splitter.addWidget(self.editor)
         splitter.setSizes([300, 900])
         main_layout.addWidget(splitter)
+        
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.workspace_label = QLabel("Nessun workspace aperto")
         self.status_bar.addWidget(self.workspace_label)
-
-        # Aggiungi:
         self.cursor_label = QLabel("R: 1, C: 1")
         self.cursor_label.setStyleSheet("padding: 0 8px;")
         self.status_bar.addPermanentWidget(self.cursor_label)
-
         self.stats_label = QLabel("Pratiche: 0 | Task: 0")
         self.stats_label.setStyleSheet("padding: 0 8px;")
         self.status_bar.addPermanentWidget(self.stats_label)
-
         self.pomodoro_timer = PomodoroTimer()
         self.pomodoro_timer.hide()
         self.status_bar.addPermanentWidget(self.pomodoro_timer)
@@ -149,23 +167,6 @@ class PracticeWorkspace(QMainWindow):
         self.open_action.setShortcut(QKeySequence.Open) # type: ignore
         self.toolbar.addAction(self.open_action)
         self.toolbar.addSeparator()
-        self.filter_frame = QFrame()
-        filter_layout = QHBoxLayout(self.filter_frame)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(6)
-        self.filter_edit = QLineEdit()
-        self.filter_edit.setPlaceholderText("🔍 Cerca pratiche e task...")
-        self.filter_edit.setMinimumWidth(250)
-        filter_layout.addWidget(self.filter_edit)
-        self.toolbar.addWidget(self.filter_frame)
-        self.toolbar.addSeparator()
-        self.open_tasks_only = QCheckBox("Solo aperti")
-        self.toolbar.addWidget(self.open_tasks_only)
-        self.today_only = QCheckBox("Solo oggi")
-        self.toolbar.addWidget(self.today_only)
-        self.with_files_only = QCheckBox("Con allegati")
-        self.toolbar.addWidget(self.with_files_only)
-        self.toolbar.addSeparator()
         self.save_action = QAction("💾 Salva", self)
         self.save_action.setShortcut(QKeySequence.Save)
         self.toolbar.addAction(self.save_action)
@@ -204,10 +205,7 @@ class PracticeWorkspace(QMainWindow):
         self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
         self.tree_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_widget.customContextMenuRequested.connect(self._on_tree_context_menu)
-        self.filter_edit.textChanged.connect(self._apply_filter)
-        self.open_tasks_only.toggled.connect(self._apply_filter)
-        self.today_only.toggled.connect(self._apply_filter)
-        self.with_files_only.toggled.connect(self._apply_filter)
+        self.tree_search.textChanged.connect(self._apply_filter)
         self.file_watcher.fileChanged.connect(self._on_file_changed)
 
     def _setup_shortcuts(self):
@@ -821,48 +819,18 @@ class PracticeWorkspace(QMainWindow):
     # ========================================================================
 
     def _apply_filter(self):
-        filter_text = self.filter_edit.text().lower()
-        show_open_only = self.open_tasks_only.isChecked()
-        show_today_only = self.today_only.isChecked()
-        show_with_files = self.with_files_only.isChecked()
-        today_str = datetime.now().strftime("%Y-%m-%d")
-
+        filter_text = self.tree_search.text().lower()
+        
         def filter_items(item: QTreeWidgetItem):
-            data = item.data(0, Qt.UserRole)
-            item_type = data.get('type') if data else None
-
-            if item_type is None and 'File collegati' in item.text(0):
-                return
-
-            visible = True
-            text = item.text(0).lower()
-
-            if filter_text and filter_text not in text:
-                visible = False
-            if show_open_only and item_type == 'task':
-                if text.startswith('☑'):
-                    visible = False
-            if show_today_only and item_type == 'task':
-                if today_str not in item.text(0):
-                    visible = False
-            if show_with_files and item_type == 'practice':
-                has_files = False
-                for i in range(item.childCount()):
-                    child = item.child(i)
-                    child_data = child.data(0, Qt.UserRole)
-                    if child_data and child_data.get('type') in ('file', 'file_missing'):
-                        has_files = True
-                        break
-                    if 'File collegati' in child.text(0) and child.childCount() > 0:
-                        has_files = True
-                        break
-                if not has_files:
-                    visible = False
-
-            item.setHidden(not visible)
+            if not filter_text:
+                item.setHidden(False)
+            else:
+                text = item.text(0).lower()
+                item.setHidden(filter_text not in text)
+            
             for i in range(item.childCount()):
                 filter_items(item.child(i))
-
+        
         root = self.tree_widget.invisibleRootItem()
         for i in range(root.childCount()):
             filter_items(root.child(i))
