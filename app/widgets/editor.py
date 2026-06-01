@@ -29,6 +29,7 @@ class PracticeEditor(QTextEdit):
     ctrlNPressed = Signal()
     f5Pressed = Signal()
     findRequested = Signal()
+    gotoLineRequested = Signal()
 
     _practice_link_pattern = re.compile(r'^#\s+(.+)$')
     _quoted_file_pattern = re.compile(r"""@['"]([^'"]+\.\w+)['"]""")
@@ -225,6 +226,9 @@ class PracticeEditor(QTextEdit):
                 return
             elif event.key() == Qt.Key_N:
                 self.ctrlNPressed.emit()
+                return
+            elif event.key() == Qt.Key_G:
+                self._show_goto_line()
                 return
 
         if event.key() == Qt.Key_F5:
@@ -536,3 +540,26 @@ class PracticeEditor(QTextEdit):
                 break
         cursor.endEditBlock()
         self.documentChanged.emit()
+
+    def _show_goto_line(self):
+        """Mostra un dialog per andare a una riga specifica."""
+        from PySide6.QtWidgets import QInputDialog
+
+        max_line = self.document().blockCount()
+        line, ok = QInputDialog.getInt(
+            self,
+            "Vai alla riga",
+            f"Numero di riga (1-{max_line}):",
+            value=1,
+            min=1,
+            max=max_line,
+        )
+
+        if ok:
+            block = self.document().findBlockByLineNumber(line - 1)
+            if block.isValid():
+                cursor = QTextCursor(block)
+                cursor.movePosition(QTextCursor.StartOfBlock)
+                self.setTextCursor(cursor)
+                self.setFocus()
+                self.ensureCursorVisible()
