@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QSplitter,
     QLineEdit, QPushButton, QLabel, QFileDialog, QMessageBox,
     QToolBar, QStatusBar, QInputDialog, QCheckBox, QFrame,
-    QMenu
+    QMenu, QTextEdit
 )
 from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher, QSettings
 from PySide6.QtGui import QAction, QKeySequence, QColor, QTextCursor
@@ -21,6 +21,8 @@ from app.models import DocumentNode
 from app.constants import FILE_ICONS
 from app.history import DocumentHistory
 from app.widgets import PracticeEditor, AutocompletePopup, CommandPalette
+from app.widgets.settings_dialog import SettingsDialog
+from app.widgets.pomodoro_timer import PomodoroTimer
 
 
 class PracticeWorkspace(QMainWindow):
@@ -46,6 +48,7 @@ class PracticeWorkspace(QMainWindow):
         self._refresh_timer.timeout.connect(self._do_refresh_tree)
         self.practice_paths: Dict[str, str] = {}
         self.document_history = None
+        self.current_task_line = -1
 
         self._setup_ui()
         self._setup_connections()
@@ -88,6 +91,10 @@ class PracticeWorkspace(QMainWindow):
         self.stats_label = QLabel("Pratiche: 0 | Task: 0")
         self.stats_label.setStyleSheet("padding: 0 8px;")
         self.status_bar.addPermanentWidget(self.stats_label)
+
+        self.pomodoro_timer = PomodoroTimer()
+        self.pomodoro_timer.hide()
+        self.status_bar.addPermanentWidget(self.pomodoro_timer)
 
     def _update_modified_indicator(self):
         """Aggiunge/rimuove * accanto al nome del file nella status bar."""
@@ -181,6 +188,11 @@ class PracticeWorkspace(QMainWindow):
         open_external_action = QAction("📄 Apri Agenda.md (esterno)", self)
         open_external_action.triggered.connect(self._open_agenda_external)
         file_menu.addAction(open_external_action)
+        file_menu.addSeparator()
+        settings_action = QAction("⚙️ Impostazioni", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._show_settings)
+        file_menu.addAction(settings_action)
         edit_menu = self.menuBar().addMenu("✏️ Modifica")
         undo_action = QAction("Undo", self)
         undo_action.setShortcut(QKeySequence.Undo)
@@ -229,6 +241,11 @@ class PracticeWorkspace(QMainWindow):
         format_shortcut.setShortcut(QKeySequence("Ctrl+Shift+L"))
         format_shortcut.triggered.connect(self._format_document)
         self.addAction(format_shortcut)
+
+        task_shortcut = QAction("Task in corso", self)
+        task_shortcut.setShortcut(QKeySequence("Ctrl+T"))
+        task_shortcut.triggered.connect(self._toggle_task_in_corso)
+        self.addAction(task_shortcut)
 
     def _open_agenda_external(self):
         """Apre Agenda.md con l'applicazione predefinita di sistema."""
@@ -1096,6 +1113,10 @@ class PracticeWorkspace(QMainWindow):
         except ValueError:
             self.current_theme_mode = ThemeMode.AUTO
 
+        autosave_enabled = settings.value("autosave_enabled", True, type=bool)
+        autosave_interval = settings.value("autosave_interval", 60, type=int)
+        self._autosave_interval = int(autosave_interval) if autosave_enabled else 0
+
     def closeEvent(self, event):
         settings = QSettings("PracticeWorkspace", "MainWindow")
         settings.setValue("geometry", self.saveGeometry())
@@ -1139,3 +1160,122 @@ class PracticeWorkspace(QMainWindow):
             self._write_sessions(sessions)
         
         event.accept()
+
+    def _show_settings(self):
+        """Apre il dialog delle impostazioni."""
+        dialog = SettingsDialog(
+            self,
+            current_theme=self.current_theme_mode,
+            autosave_enabled=self._autosave_interval > 0,
+            autosave_interval=self._autosave_interval
+        )
+        if dialog.exec():
+            # Applica tema
+            new_theme = dialog.get_theme()
+            if new_theme != self.current_theme_mode:
+                self.current_theme_mode = new_theme
+                self._apply_theme()
+            
+            # Applica auto-salvataggio
+            self._autosave_interval = dialog.get_autosave_interval() if dialog.get_autosave_enabled() else 0
+            if self._autosave_interval > 0:
+                self._autosave_timer.start(self._autosave_interval * 1000)
+                self.autosave_btn.setChecked(True)
+                self.autosave_btn.setToolTip(f"Auto-salvataggio: ON ({self._autosave_interval}s)")
+            else:
+                self._autosave_timer.stop()
+                self.autosave_btn.setChecked(False)
+                self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
+            
+            # Salva impostazioni
+            settings = QSettings("PracticeWorkspace", "MainWindow")
+            settings.setValue("autosave_enabled", dialog.get_autosave_enabled())
+            settings.setValue("autosave_interval", dialog.get_autosave_interval())
+            
+            self.status_bar.showMessage("Impostazioni salvate", 3000)
+
+    def _show_settings(self):
+        """Apre il dialog delle impostazioni."""
+        dialog = SettingsDialog(
+            self,
+            current_theme=self.current_theme_mode,
+            autosave_enabled=self._autosave_interval > 0,
+            autosave_interval=self._autosave_interval if self._autosave_interval > 0 else 60
+        )
+        if dialog.exec():
+            # Applica tema
+            new_theme = dialog.get_theme()
+            if new_theme != self.current_theme_mode:
+                self.current_theme_mode = new_theme
+                self._apply_theme()
+            
+            # Applica auto-salvataggio
+            self._autosave_interval = dialog.get_autosave_interval() if dialog.get_autosave_enabled() else 0
+            if self._autosave_interval > 0:
+                self._autosave_timer.start(self._autosave_interval * 1000)
+                self.autosave_btn.setChecked(True)
+                self.autosave_btn.setToolTip(f"Auto-salvataggio: ON ({self._autosave_interval}s)")
+            else:
+                self._autosave_timer.stop()
+                self.autosave_btn.setChecked(False)
+                self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
+            
+            # Salva impostazioni
+            settings = QSettings("PracticeWorkspace", "MainWindow")
+            settings.setValue("autosave_enabled", dialog.get_autosave_enabled())
+            settings.setValue("autosave_interval", dialog.get_autosave_interval())
+            settings.setValue("theme", self.current_theme_mode.value)
+            
+            self.status_bar.showMessage("Impostazioni salvate", 3000)
+
+    def _toggle_task_in_corso(self):
+        """Attiva/disattiva il task in corso con timer."""
+        cursor = self.editor.textCursor()
+        block = cursor.block()
+        text = block.text().strip()
+        
+        if not text.startswith('- '):
+            self.status_bar.showMessage("Posizionati su un task per avviare il timer", 3000)
+            return
+        
+        line_number = block.blockNumber()
+        
+        if self.current_task_line == line_number:
+            # Disattiva
+            self.current_task_line = -1
+            self.pomodoro_timer.hide()
+            self._clear_task_highlight()
+            self.status_bar.showMessage("Task in corso disattivato", 3000)
+        else:
+            # Attiva
+            self.current_task_line = line_number
+            self.pomodoro_timer.show()
+            self._highlight_current_task()
+            self.status_bar.showMessage(f"Task in corso: {text[:50]}...", 3000)
+
+    def _highlight_current_task(self):
+        """Evidenzia il task in corso."""
+        if self.current_task_line < 0:
+            return
+        
+        block = self.editor.document().findBlockByLineNumber(self.current_task_line)
+        if not block.isValid():
+            return
+        
+        cursor = QTextCursor(block)
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        
+        extra_selections = self.editor.extraSelections()
+        
+        selection = QTextEdit.ExtraSelection()
+        selection.format.setBackground(QColor("#FFF3CD"))
+        selection.format.setProperty(QTextEdit.FullWidthSelection, True)
+        selection.cursor = cursor
+        extra_selections.append(selection)
+        
+        self.editor.setExtraSelections(extra_selections)
+
+    def _clear_task_highlight(self):
+        """Rimuove l'evidenziazione del task in corso."""
+        self.editor.setExtraSelections([])
