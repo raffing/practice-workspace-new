@@ -1,5 +1,5 @@
 import re
-from typing import Dict
+from typing import Dict, Set
 
 from PySide6.QtCore import Qt, Signal, QTimer, QRect
 from PySide6.QtGui import (
@@ -61,6 +61,8 @@ class PracticeEditor(QTextEdit):
         self.setMouseTracking(True)
         self._cached_practice_name = ""
         self._cached_block_number = -1
+        self._folded_blocks: Set[int] = set()
+        self._fold_markers: Dict[int, QRect] = {}
 
     def _setup_font(self):
         preferred_fonts = ["JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas"]
@@ -75,7 +77,7 @@ class PracticeEditor(QTextEdit):
 
     def line_number_area_width(self):
         digits = len(str(max(1, self.document().blockCount())))
-        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        space = 30 + self.fontMetrics().horizontalAdvance('9') * digits
         return space
 
     def update_line_number_area_width(self, _):
@@ -87,7 +89,9 @@ class PracticeEditor(QTextEdit):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cr = self.contentsRect()
-        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+        self.line_number_area.setGeometry(
+            QRect(cr.left(), cr.top(), self.line_number_area_width() + 20, cr.height())
+        )
         if self._search_bar and self._search_bar.isVisible():
             self._search_bar.setGeometry(0, self.height() - 40, self.width(), 40)
 
@@ -97,12 +101,15 @@ class PracticeEditor(QTextEdit):
         if self.palette().window().color().lightness() > 128:
             painter.fillRect(event.rect(), QColor("#F5F5F5"))
             painter.setPen(QColor("#999999"))
+            fold_color = QColor("#666666")
         else:
             painter.fillRect(event.rect(), QColor("#2D2D2D"))
             painter.setPen(QColor("#666666"))
+            fold_color = QColor("#999999")
 
         block = self.document().begin()
         block_number = 0
+        self._fold_markers.clear()
 
         while block.isValid():
             block_cursor = QTextCursor(block)
@@ -112,14 +119,82 @@ class PracticeEditor(QTextEdit):
                 if block.isVisible():
                     number = str(block_number + 1)
                     painter.drawText(
-                        0, rect.top(),
-                        self.line_number_area.width() - 5,
+                        20, rect.top(),
+                        self.line_number_area.width() - 25,
                         self.fontMetrics().height(),
                         Qt.AlignRight, number
                     )
 
+                    text = block.text().strip()
+                    if text.startswith('- ') and not text.startswith('- [x]'):
+                        raw_text = block.text()
+                        indent = len(raw_text) - len(raw_text.lstrip())
+
+                        next_block = block.next()
+                        has_children = False
+                        while next_block.isValid():
+                            next_text = next_block.text()
+                            if next_text.strip():
+                                next_indent = len(next_text) - len(next_text.lstrip())
+                                if next_indent > indent:
+                                    has_children = True
+                                    break
+                                if next_indent <= indent:
+                                    break
+                            next_block = next_block.next()
+
+                        if has_children:
+                            is_folded = block_number in self._folded_blocks
+                            triangle = QRect(5, rect.top() + 4, 12, 12)
+                            self._fold_markers[block_number] = triangle
+                            painter.setPen(fold_color)
+                            painter.drawText(
+                                triangle,
+                                Qt.AlignCenter,
+                                "▶" if is_folded else "▼",
+                            )
+
             block = block.next()
             block_number += 1
+
+    def line_number_area_mouse_press(self, event):
+        """Gestisce il click sui triangolini di folding."""
+        for block_number, rect in self._fold_markers.items():
+            if rect.contains(event.pos()):
+                self._toggle_fold(block_number)
+                return
+        super().mousePressEvent(event)
+
+    def _toggle_fold(self, block_number: int):
+        """Piega o espandi un task e i suoi figli."""
+        block = self.document().findBlockByLineNumber(block_number)
+        if not block.isValid():
+            return
+
+        text = block.text()
+        indent = len(text) - len(text.lstrip())
+
+        if block_number in self._folded_blocks:
+            self._folded_blocks.remove(block_number)
+            visible = True
+        else:
+            self._folded_blocks.add(block_number)
+            visible = False
+
+        next_block = block.next()
+        while next_block.isValid():
+            next_text = next_block.text()
+            if next_text.strip():
+                next_indent = len(next_text) - len(next_text.lstrip())
+                if next_indent <= indent:
+                    break
+            next_block.setVisible(visible)
+            next_block = next_block.next()
+
+        self.document().markContentsDirty(block.position(), self.document().characterCount())
+        self.line_number_area.update()
+        self.viewport().update()
+        self.update()
 
     def highlight_current_line(self):
         pass
@@ -161,6 +236,10 @@ class PracticeEditor(QTextEdit):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            if event.position().x() < self.line_number_area_width():
+                self.line_number_area_mouse_press(event)
+                return
+
             pos = event.position().toPoint()
             cursor = self.cursorForPosition(pos)
             block = cursor.block()
