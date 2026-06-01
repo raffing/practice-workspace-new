@@ -551,11 +551,10 @@ class PracticeEditor(QTextEdit):
             "Vai alla riga",
             f"Numero di riga (1-{max_line}):",
             value=1,
-            min=1,
-            max=max_line,
         )
 
         if ok:
+            line = max(1, min(line, max_line))
             block = self.document().findBlockByLineNumber(line - 1)
             if block.isValid():
                 cursor = QTextCursor(block)
