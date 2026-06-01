@@ -37,6 +37,9 @@ class PracticeWorkspace(QMainWindow):
         # Timer per salvataggio automatico
         self._autosave_timer = QTimer()
         self._autosave_timer.timeout.connect(self._autosave)
+        self._session_id = os.environ.get('COMPUTERNAME', 'unknown')
+        self._presence_timer = QTimer()
+        self._presence_timer.timeout.connect(self._update_presence)
         self._autosave_interval = 60  # secondi, 0 = disabilitato
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._do_refresh_tree)
@@ -265,6 +268,9 @@ class PracticeWorkspace(QMainWindow):
                 encoding='utf-8'
             )
         self._load_document(agenda_file)
+        self._check_presence()
+        self._update_presence()
+        self._presence_timer.start(30000)
         self._start_autosave()
 
 
@@ -284,6 +290,52 @@ class PracticeWorkspace(QMainWindow):
             self._update_stats()
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile caricare il documento: {e}")
+
+    def _sessions_file(self):
+        return self.workspace_path / "Agenda.md.sessions.yaml" if self.workspace_path else None
+
+    def _read_sessions(self):
+        file = self._sessions_file()
+        if file and file.exists():
+            return yaml.safe_load(file.read_text(encoding='utf-8')) or {}
+        return {}
+
+    def _write_sessions(self, sessions):
+        file = self._sessions_file()
+        if file:
+            file.write_text(yaml.dump(sessions, allow_unicode=True), encoding='utf-8')
+
+    def _update_presence(self):
+        sessions = self._read_sessions()
+        sessions[self._session_id] = {
+            'username': os.environ.get('USERNAME', 'unknown'),
+            'last_seen': datetime.now().isoformat(),
+            'status': 'active'
+        }
+        now = datetime.now()
+        for sid in list(sessions.keys()):
+            if sid != self._session_id:
+                last_seen = sessions[sid].get('last_seen')
+                if last_seen:
+                    try:
+                        last = datetime.fromisoformat(last_seen)
+                    except ValueError:
+                        continue
+                    if (now - last).seconds > 300:
+                        sessions[sid]['status'] = 'away'
+        self._write_sessions(sessions)
+
+    def _check_presence(self):
+        sessions = self._read_sessions()
+        active = {
+            k: v for k, v in sessions.items()
+            if k != self._session_id and v.get('status') == 'active'
+        }
+        if active:
+            names = [f"{v['username']} ({k})" for k, v in active.items()]
+            self.status_bar.showMessage(
+                f"Workspace condiviso con: {', '.join(names)}", 5000
+            )
 
     def _save_document(self):
         if not self.workspace_path:
@@ -889,5 +941,11 @@ class PracticeWorkspace(QMainWindow):
                 elif reply == QMessageBox.Cancel:
                     event.ignore()
                     return
+
+        sessions = self._read_sessions()
+        if self._session_id in sessions:
+            sessions[self._session_id]['status'] = 'closed'
+            sessions[self._session_id]['last_seen'] = datetime.now().isoformat()
+            self._write_sessions(sessions)
         
         event.accept()

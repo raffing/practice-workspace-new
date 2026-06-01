@@ -10,7 +10,7 @@
 - [x] Numeri di riga nell'editor
 - [x] Status bar arricchita (riga:colonna + statistiche task/pratiche)
 - [x] Salvataggio automatico silenzioso con toggle (⏱️)
-- [ ] Presenza condivisa (sessioni multi-utente) — rimandata
+- [x] Presenza condivisa (sessioni multi-utente)
 
 ## Sessione 2
 
