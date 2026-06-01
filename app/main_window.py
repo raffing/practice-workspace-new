@@ -19,6 +19,7 @@ from app.theme import Theme, ThemeMode
 from app.parser import DocumentParser
 from app.models import DocumentNode
 from app.constants import FILE_ICONS
+from app.history import DocumentHistory
 from app.widgets import PracticeEditor, AutocompletePopup, CommandPalette
 
 
@@ -44,6 +45,7 @@ class PracticeWorkspace(QMainWindow):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._do_refresh_tree)
         self.practice_paths: Dict[str, str] = {}
+        self.document_history = None
 
         self._setup_ui()
         self._setup_connections()
@@ -215,6 +217,11 @@ class PracticeWorkspace(QMainWindow):
         shortcut.triggered.connect(self._show_command_palette)
         self.addAction(shortcut)
 
+        history_shortcut = QAction("Cronologia", self)
+        history_shortcut.setShortcut(QKeySequence("Ctrl+Shift+H"))
+        history_shortcut.triggered.connect(self._show_history)
+        self.addAction(history_shortcut)
+
     # ========================================================================
     # THEME
     # ========================================================================
@@ -268,6 +275,7 @@ class PracticeWorkspace(QMainWindow):
                 encoding='utf-8'
             )
         self._load_document(agenda_file)
+        self.document_history = DocumentHistory(self.workspace_path)
         self._check_presence()
         self._update_presence()
         self._presence_timer.start(30000)
@@ -358,6 +366,16 @@ class PracticeWorkspace(QMainWindow):
                     new_lines.append(line)
             
             content_with_paths = '\n'.join(new_lines)
+            if (
+                self.document_history
+                and self.editor.last_saved_content
+                and content_with_paths != self.editor.last_saved_content
+            ):
+                self.document_history.add_entry(
+                    self.editor.last_saved_content,
+                    content_with_paths,
+                )
+
             agenda_file.write_text(content_with_paths, encoding='utf-8')
             self.editor.last_saved_content = content_with_paths
             self._update_modified_indicator()
@@ -907,6 +925,59 @@ class PracticeWorkspace(QMainWindow):
     def _on_document_changed(self):
         self._update_modified_indicator()
         self._refresh_timer.start(300)
+
+    def _show_history(self):
+        """Mostra la finestra della cronologia."""
+        if not self.document_history:
+            self.status_bar.showMessage("Nessuna cronologia disponibile", 3000)
+            return
+
+        from PySide6.QtWidgets import (
+            QDialog,
+            QListWidget,
+            QListWidgetItem,
+            QTextEdit,
+            QVBoxLayout,
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cronologia modifiche")
+        dialog.setMinimumSize(800, 500)
+
+        layout = QVBoxLayout(dialog)
+        splitter = QSplitter(Qt.Vertical)
+
+        list_widget = QListWidget()
+        entries = self.document_history.get_entries()
+        start_index = self.document_history.count() - len(entries)
+        for i, entry in enumerate(reversed(entries)):
+            ts = entry['timestamp'][:19].replace('T', ' ')
+            item = QListWidgetItem(f"{ts} - {entry['user']} ({entry['summary']})")
+            item.setData(Qt.UserRole, start_index + len(entries) - 1 - i)
+            list_widget.addItem(item)
+
+        diff_view = QTextEdit()
+        diff_view.setReadOnly(True)
+        diff_view.setFont(self.editor.font())
+
+        splitter.addWidget(list_widget)
+        splitter.addWidget(diff_view)
+        layout.addWidget(splitter)
+
+        def show_diff(current, previous):
+            if not current:
+                diff_view.clear()
+                return
+            index = current.data(Qt.UserRole)
+            entry = self.document_history.get_entry(index)
+            if entry:
+                diff_view.setPlainText(entry['diff'])
+
+        list_widget.currentItemChanged.connect(show_diff)
+        if list_widget.count() > 0:
+            list_widget.setCurrentRow(0)
+
+        dialog.exec()
 
     # ========================================================================
     # SETTINGS
