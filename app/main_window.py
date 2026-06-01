@@ -169,17 +169,7 @@ class PracticeWorkspace(QMainWindow):
         self.save_action = QAction("💾 Salva", self)
         self.save_action.setShortcut(QKeySequence.Save)
         self.toolbar.addAction(self.save_action)
-        self.theme_btn = QPushButton("🌓")
-        self.theme_btn.setToolTip("Cambia tema (Light/Dark/Auto)")
-        self.theme_btn.setFixedSize(36, 36)
-        self.autosave_btn = QPushButton("⏱️")
-        self.autosave_btn.setToolTip("Auto-salvataggio: ON (60s)")
-        self.autosave_btn.setFixedSize(36, 36)
-        self.autosave_btn.setCheckable(True)
-        self.autosave_btn.setChecked(True)
-        self.autosave_btn.clicked.connect(self._toggle_autosave)
-        self.toolbar.addWidget(self.autosave_btn)
-        self.toolbar.addWidget(self.theme_btn)
+
 
     def _setup_connections(self):
         file_menu = self.menuBar().addMenu("📁 File")
@@ -200,14 +190,8 @@ class PracticeWorkspace(QMainWindow):
         redo_action = QAction("Redo", self)
         redo_action.setShortcut(QKeySequence.Redo)
         edit_menu.addAction(redo_action)
-        view_menu = self.menuBar().addMenu("👁️ Vista")
-        theme_action = QAction("🌓 Cambia tema", self)
-        theme_action.triggered.connect(self._cycle_theme)
-        view_menu.addAction(theme_action)
-
         self.open_action.triggered.connect(self._open_workspace)
         self.save_action.triggered.connect(self._save_document)
-        self.theme_btn.clicked.connect(self._cycle_theme)
         self.editor.cursorPositionChanged.connect(self._update_cursor_position)
         self.editor.practiceClicked.connect(self._on_practice_name_clicked)
         self.editor.fileClicked.connect(self._open_file)
@@ -260,25 +244,13 @@ class PracticeWorkspace(QMainWindow):
     # THEME
     # ========================================================================
 
-    def _cycle_theme(self):
-        if self.current_theme_mode == ThemeMode.AUTO:
-            self.current_theme_mode = ThemeMode.LIGHT
-        elif self.current_theme_mode == ThemeMode.LIGHT:
-            self.current_theme_mode = ThemeMode.DARK
-        else:
-            self.current_theme_mode = ThemeMode.AUTO
-        self._apply_theme()
-        icons = {ThemeMode.LIGHT: "☀️", ThemeMode.DARK: "🌙", ThemeMode.AUTO: "🌓"}
-        self.theme_btn.setText(icons[self.current_theme_mode])
-        self.status_bar.showMessage(f"Tema: {self.current_theme_mode.value}", 2000)
+
 
     def _apply_theme(self):
         from PySide6.QtWidgets import QApplication
         self.current_theme = Theme.get_theme(self.current_theme_mode)
         Theme.apply_to_app(QApplication.instance(), self.current_theme)
         self.editor.update_theme(self.current_theme)
-        icons = {ThemeMode.LIGHT: "☀️", ThemeMode.DARK: "🌙", ThemeMode.AUTO: "🌓"}
-        self.theme_btn.setText(icons[self.current_theme_mode])
 
     # ========================================================================
     # WORKSPACE & DOCUMENT
@@ -476,14 +448,7 @@ class PracticeWorkspace(QMainWindow):
             self._save_document()
             # Non mostrare messaggio nella status bar, è silenzioso
     
-    def _toggle_autosave(self, checked):
-        if checked:
-            self._autosave_interval = 60
-            self._start_autosave()
-            self.autosave_btn.setToolTip("Auto-salvataggio: ON (60s)")
-        else:
-            self._autosave_timer.stop()
-            self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
+
 
     def _format_document(self):
         """Pulisce la formattazione del documento."""
@@ -1161,38 +1126,7 @@ class PracticeWorkspace(QMainWindow):
         
         event.accept()
 
-    def _show_settings(self):
-        """Apre il dialog delle impostazioni."""
-        dialog = SettingsDialog(
-            self,
-            current_theme=self.current_theme_mode,
-            autosave_enabled=self._autosave_interval > 0,
-            autosave_interval=self._autosave_interval
-        )
-        if dialog.exec():
-            # Applica tema
-            new_theme = dialog.get_theme()
-            if new_theme != self.current_theme_mode:
-                self.current_theme_mode = new_theme
-                self._apply_theme()
-            
-            # Applica auto-salvataggio
-            self._autosave_interval = dialog.get_autosave_interval() if dialog.get_autosave_enabled() else 0
-            if self._autosave_interval > 0:
-                self._autosave_timer.start(self._autosave_interval * 1000)
-                self.autosave_btn.setChecked(True)
-                self.autosave_btn.setToolTip(f"Auto-salvataggio: ON ({self._autosave_interval}s)")
-            else:
-                self._autosave_timer.stop()
-                self.autosave_btn.setChecked(False)
-                self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
-            
-            # Salva impostazioni
-            settings = QSettings("PracticeWorkspace", "MainWindow")
-            settings.setValue("autosave_enabled", dialog.get_autosave_enabled())
-            settings.setValue("autosave_interval", dialog.get_autosave_interval())
-            
-            self.status_bar.showMessage("Impostazioni salvate", 3000)
+
 
     def _show_settings(self):
         """Apre il dialog delle impostazioni."""
@@ -1213,12 +1147,8 @@ class PracticeWorkspace(QMainWindow):
             self._autosave_interval = dialog.get_autosave_interval() if dialog.get_autosave_enabled() else 0
             if self._autosave_interval > 0:
                 self._autosave_timer.start(self._autosave_interval * 1000)
-                self.autosave_btn.setChecked(True)
-                self.autosave_btn.setToolTip(f"Auto-salvataggio: ON ({self._autosave_interval}s)")
             else:
                 self._autosave_timer.stop()
-                self.autosave_btn.setChecked(False)
-                self.autosave_btn.setToolTip("Auto-salvataggio: OFF")
             
             # Salva impostazioni
             settings = QSettings("PracticeWorkspace", "MainWindow")
