@@ -4,12 +4,13 @@
 
 ---
 
-## Sessione 1
+## ✅ Sessione 1 (completata)
 
-- [ ] Numeri di riga nell'editor
-- [ ] Status bar arricchita (riga:colonna + statistiche task/pratiche)
-- [ ] Salvataggio automatico silenzioso
-- [ ] Presenza condivisa (sessioni multi-utente)
+- [x] Fix rinomina pratica (regex parentesi)
+- [x] Numeri di riga nell'editor
+- [x] Status bar arricchita (riga:colonna + statistiche task/pratiche)
+- [x] Salvataggio automatico silenzioso con toggle (⏱️)
+- [ ] Presenza condivisa (sessioni multi-utente) — rimandata
 
 ## Sessione 2
 
@@ -28,14 +29,11 @@
   - [ ] Rimuovi pratica dall'Agenda (con conferma)
   - [ ] Associa pratica senza path a una cartella
 - [ ] Fix spaziature all'inserimento di nuove pratiche
-
-## Sessione 5
-
 - [ ] Barra di ricerca dedicata sopra l'albero laterale
 - [ ] Apri Agenda.md con app predefinita di sistema
 - [ ] Auto-rimozione del trattino su riga vuota nell'editor
 - [ ] Directory nei link @ (cartelle cliccabili, visualizzate nell'albero)
-
-## Sessione 6
-
-- [ ] Test generali e ritocchi finali dell'editor
+- [ ] Nodi workspace collassati di default
+- [ ] Formatta testo (Ctrl+Shift+F) — pulisci indentazioni e spazi
+- [ ] Menu ⚙️ Impostazioni (Ctrl+,) con dialog per tema, auto-save, presenza
+- [ ] Task in corso con marcatore persistente + timer Pomodoro (Ctrl+T)
