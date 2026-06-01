@@ -68,7 +68,7 @@ class PracticeWorkspace(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        self._setup_toolbar()
+
         splitter = QSplitter(Qt.Horizontal) # type: ignore
         
         # Pannello sinistro con barra di ricerca + albero
@@ -159,20 +159,15 @@ class PracticeWorkspace(QMainWindow):
             f"Pratiche: {practice_count} | Task: {task_count} ({open_count} aperti, {today_count} oggi)"
         )
 
-    def _setup_toolbar(self):
-        self.toolbar = QToolBar()
-        self.toolbar.setMovable(False)
-        self.addToolBar(self.toolbar)
-        self.open_action = QAction("📂 Apri", self)
-        self.open_action.setShortcut(QKeySequence.Open) # type: ignore
-        self.toolbar.addAction(self.open_action)
-        self.toolbar.addSeparator()
-        self.save_action = QAction("💾 Salva", self)
-        self.save_action.setShortcut(QKeySequence.Save)
-        self.toolbar.addAction(self.save_action)
+
 
 
     def _setup_connections(self):
+        self.open_action = QAction("📂 Apri", self)
+        self.open_action.setShortcut(QKeySequence.Open)
+        self.save_action = QAction("💾 Salva", self)
+        self.save_action.setShortcut(QKeySequence.Save)
+
         file_menu = self.menuBar().addMenu("📁 File")
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
