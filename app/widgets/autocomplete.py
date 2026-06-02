@@ -203,7 +203,8 @@ class AutocompletePopup(QDialog):
             return False
         if self.navigator.current_path != self.navigator.root_path:
             parent_path = self.navigator.current_path.parent
-            if parent_path >= self.navigator.root_path:
+            # Usa is_relative_to per garantire che rimaniamo dentro il workspace
+            if parent_path.is_relative_to(self.navigator.root_path):
                 self.navigator.navigate_to(parent_path)
                 self.filter_edit.clear()
                 self._populate_items()

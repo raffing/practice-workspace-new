@@ -7,16 +7,16 @@ from .constants import WEEKDAYS, MONTHS
 class DocumentParser:
     _practice_pattern = re.compile(r'^# (.+)$')
     _task_pattern = re.compile(r'^(\s*)-\s+(?:\[([ x])\]\s+)?(.+)$')
-    _tag_pattern = re.compile(r'#(\w+)')
+    _tag_pattern = re.compile(r'#([\wÀ-ÿ-]+)')
     _person_pattern = re.compile(r'@([A-Za-zÀ-ÿ]+(?:\s[A-Za-zÀ-ÿ]+)*)')
-    _file_pattern = re.compile(r"""@(?:['"]([^'"]+)['"]|(\S+))""")
+    _file_pattern = re.compile(r"""@(?:['"]([^'"]+)['"]|([^\s#@]+))""")
     _today_pattern = re.compile(r'\boggi\b', re.IGNORECASE)
     _tomorrow_pattern = re.compile(r'\bdomani\b', re.IGNORECASE)
     _date_pattern = re.compile(
         r'(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)',
         re.IGNORECASE
     )
-    _clean_file_pattern = re.compile(r"""@(?:['"][^'"]+['"]|\S+\.\w+)""")
+    _clean_file_pattern = re.compile(r"""@(?:['"][^'"]+['"]|[^\s#@]+)""")
     _multi_space_pattern = re.compile(r'\s+')
     
     def parse_document(self, text: str) -> List[DocumentNode]:

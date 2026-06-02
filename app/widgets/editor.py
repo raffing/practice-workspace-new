@@ -32,8 +32,8 @@ class PracticeEditor(QTextEdit):
     gotoLineRequested = Signal()
 
     _practice_link_pattern = re.compile(r'^#\s+(.+)$')
-    _quoted_file_pattern = re.compile(r"""@['"]([^'"]+\.\w+)['"]""")
-    _simple_file_pattern = re.compile(r'@(\S+\.\w+)')
+    _quoted_file_pattern = re.compile(r"""@['"]([^'"]+)['"]""")
+    _simple_file_pattern = re.compile(r'@([^\s#@]+)')
     _task_indent_pattern = re.compile(r'^(\s*)-\s+')
     _practice_line_pattern = re.compile(r'^#\s+')
     _task_line_pattern = re.compile(r'^(\s*)-\s+(?:\[x\]\s+)?(.+)$')
@@ -259,7 +259,7 @@ class PracticeEditor(QTextEdit):
             elif event.key() == Qt.Key_Down:
                 self._move_line(1)
                 return
-            elif event.key() == Qt.Key_O:
+            elif event.key() == Qt.Key_O or event.key() == Qt.Key_F:
                 self._toggle_fold_current()
                 return
 

@@ -224,20 +224,36 @@ class PracticeWorkspace(QMainWindow):
         task_shortcut.triggered.connect(self._toggle_task_in_corso)
         self.addAction(task_shortcut)
 
+    def _open_path(self, path: Path):
+        """Apre un file o una cartella in modo portabile (Bug #10)."""
+        import sys
+        import subprocess
+        path_str = str(path)
+        try:
+            if sys.platform == 'win32':
+                os.startfile(path_str)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', path_str])
+            else:
+                subprocess.Popen(['xdg-open', path_str])
+        except (OSError, AttributeError):
+            # Fallback per Windows se startfile fallisce
+            if sys.platform == 'win32':
+                if path.is_dir():
+                    subprocess.Popen(['explorer.exe', path_str])
+                else:
+                    subprocess.Popen(['notepad.exe', path_str])
+            else:
+                self.status_bar.showMessage(f"Impossibile aprire: {path.name}", 3000)
+
     def _open_agenda_external(self):
         """Apre Agenda.md con l'applicazione predefinita di sistema o Notepad."""
         if not self.workspace_path:
             return
         agenda_file = self.workspace_path / "Agenda.md"
         if agenda_file.exists():
-            try:
-                os.startfile(str(agenda_file))
-                self.status_bar.showMessage("Agenda.md aperto con app predefinita", 3000)
-            except OSError:
-                # Se non c'è un'applicazione associata, prova con Notepad
-                import subprocess
-                subprocess.Popen(['notepad.exe', str(agenda_file)])
-                self.status_bar.showMessage("Agenda.md aperto con Notepad", 3000)
+            self._open_path(agenda_file)
+            self.status_bar.showMessage("Agenda.md aperto", 3000)
 
     # ========================================================================
     # THEME
@@ -293,14 +309,16 @@ class PracticeWorkspace(QMainWindow):
             self.practice_paths = dict(
                 re.findall(r'^# \[([^\]]+)\]\(([^)]+)\)', raw_content, re.MULTILINE)
             )
-            # Pulisci anche i file con path: @[nome](path) -> @nome
+            
+            # Pulisce i path delle pratiche
             clean_content = re.sub(
-                r'@\[([^\]]+)\]\([^)]+\)', r'@\1', raw_content, flags=re.MULTILINE
+                r'^# \[([^\]]+)\]\([^)]+\)', r'# \1', raw_content, flags=re.MULTILINE
             )
-            # Pulisci i path delle pratiche
+            # Pulisce i path dei file: @[nome](path) -> @nome
             clean_content = re.sub(
-                r'^# \[([^\]]+)\]\([^)]+\)', r'# \1', clean_content, flags=re.MULTILINE
+                r'@\[([^\]]+)\]\([^)]+\)', r'@\1', clean_content, flags=re.MULTILINE
             )
+            
             self.editor.setPlainText(clean_content)
             self.editor.last_saved_content = raw_content
             self._update_modified_indicator()
@@ -355,7 +373,7 @@ class PracticeWorkspace(QMainWindow):
                 f"Workspace condiviso con: {', '.join(names)}", 5000
             )
 
-    def _save_document(self):
+    def _save_document(self, is_autosave=False):
         if not self.workspace_path:
             return
         agenda_file = self.workspace_path / "Agenda.md"
@@ -364,7 +382,8 @@ class PracticeWorkspace(QMainWindow):
             lines = clean_text.split('\n')
             
             new_lines = []
-            current_practice_path = None
+            # Default alla radice del workspace per file fuori dalle pratiche (Bug #6)
+            current_practice_path = "."
             
             for line in lines:
                 if line.startswith('# '):
@@ -373,7 +392,7 @@ class PracticeWorkspace(QMainWindow):
                         current_practice_path = self.practice_paths[name]
                         new_lines.append(f'# [{name}]({current_practice_path})')
                     else:
-                        current_practice_path = None
+                        current_practice_path = "."
                         new_lines.append(line)
                 else:
                     # Sostituisci i riferimenti @file con @[file](path) se il file esiste
@@ -396,14 +415,19 @@ class PracticeWorkspace(QMainWindow):
             agenda_file.write_text(content_with_paths, encoding='utf-8')
             self.editor.last_saved_content = content_with_paths
             self._update_modified_indicator()
-            self.status_bar.showMessage("Documento salvato", 3000)
+            if not is_autosave:
+                self.status_bar.showMessage("Documento salvato", 3000)
         except Exception as e:
-            QMessageBox.critical(self, "Errore", f"Impossibile salvare il documento: {e}")
+            if not is_autosave:
+                QMessageBox.critical(self, "Errore", f"Impossibile salvare il documento: {e}")
+            else:
+                # Logga silenziosamente l'errore di autosave
+                import sys
+                print(f"Autosave error: {e}", file=sys.stderr)
 
     def _resolve_file_links(self, line: str, practice_dir: Path) -> str:
-        """Sostituisce @nomefile con @[nomefile](path/relativo) se il file esiste."""
+        """Sostituisce @nomefile con @[nomefile](path/relativo) deterministicamente."""
         import re
-        # Pattern per @nomefile (con o senza apici)
         pattern = re.compile(r"""@(?:'([^']+)'|"([^"]+)"|(\S+))""")
         
         def replace_match(match):
@@ -411,16 +435,13 @@ class PracticeWorkspace(QMainWindow):
             if not filename:
                 return match.group(0)
             
-            # Cerca il file nella directory della pratica
-            file_path = practice_dir / filename
-            if file_path.exists():
-                try:
-                    rel = file_path.relative_to(self.workspace_path)
-                    rel_str = str(rel).replace('\\', '/')
-                    return f"@[{filename}]({rel_str})"
-                except ValueError:
-                    pass
-            # File non trovato, lascia com'è
+            # Calcola sempre il path relativo (non controlla esistenza)
+            try:
+                rel = (practice_dir / filename).relative_to(self.workspace_path)
+                rel_str = str(rel).replace('\\', '/')
+                return f"@[{filename}]({rel_str})"
+            except ValueError:
+                pass
             return match.group(0)
         
         return pattern.sub(replace_match, line)
@@ -466,23 +487,31 @@ class PracticeWorkspace(QMainWindow):
         """Salva silenziosamente se ci sono modifiche."""
         if not self.workspace_path:
             return
+        
+        # Rigenera il contenuto con i path correnti per il confronto
         clean_text = self.editor.toPlainText()
         lines = clean_text.split('\n')
         new_lines = []
+        current_practice_path = "."
         for line in lines:
             if line.startswith('# '):
                 name = line[2:].strip()
                 if name in self.practice_paths:
-                    new_lines.append(f'# [{name}]({self.practice_paths[name]})')
+                    current_practice_path = self.practice_paths[name]
+                    new_lines.append(f'# [{name}]({current_practice_path})')
                 else:
+                    current_practice_path = "."
                     new_lines.append(line)
             else:
+                if current_practice_path:
+                    practice_dir = self.workspace_path / current_practice_path
+                    line = self._resolve_file_links(line, practice_dir)
                 new_lines.append(line)
+        
         current_with_paths = '\n'.join(new_lines)
         
         if current_with_paths != self.editor.last_saved_content:
-            self._save_document()
-            # Non mostrare messaggio nella status bar, è silenzioso
+            self._save_document(is_autosave=True)
     
 
 
@@ -535,11 +564,7 @@ class PracticeWorkspace(QMainWindow):
             rel_path = self.practice_paths[practice_name]
             full_path = self.workspace_path / rel_path
             if full_path.is_dir():
-                try:
-                    os.startfile(str(full_path))
-                except OSError:
-                    import subprocess
-                    subprocess.Popen(['explorer.exe', str(full_path)])
+                self._open_path(full_path)
                 self.status_bar.showMessage(f"Aperta: {practice_name}", 3000)
                 return True
         self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
@@ -792,15 +817,7 @@ class PracticeWorkspace(QMainWindow):
         if item_type == 'file':
             filepath = data.get('path')
             if filepath and Path(filepath).exists():
-                try:
-                    os.startfile(filepath)
-                except OSError:
-                    import subprocess
-                    target = Path(filepath)
-                    if target.is_dir():
-                        subprocess.Popen(['explorer.exe', str(target)])
-                    else:
-                        subprocess.Popen(['notepad.exe', str(target)])
+                self._open_path(Path(filepath))
                 self.status_bar.showMessage(f"Aperto: {data.get('filename', '')}", 3000)
             return
         if item_type == 'file_missing':

@@ -31,7 +31,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(t['warning']))
-        rules.append((re.compile(r'#\w+'), fmt))
+        rules.append((re.compile(r'#[\wÀ-ÿ-]+'), fmt))
         
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(t['purple']))
@@ -40,12 +40,12 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(t['info']))
         fmt.setUnderlineStyle(QTextCharFormat.SingleUnderline)
-        rules.append((re.compile(r"""@['"][^'"]+\.\w+['"]"""), fmt))
+        rules.append((re.compile(r"""@['"][^'"]+['"]"""), fmt))
         
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(t['info']))
         fmt.setUnderlineStyle(QTextCharFormat.SingleUnderline)
-        rules.append((re.compile(r'@\S+\.\w+'), fmt))
+        rules.append((re.compile(r'@([^\s#@]+)'), fmt))
         
         return rules
     
