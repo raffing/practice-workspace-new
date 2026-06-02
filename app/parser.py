@@ -1,22 +1,20 @@
-﻿import re
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict
+from .agenda_markup import extract_file_mentions, parse_practice_heading, remove_file_mentions
 from .models import DocumentNode, TaskStatus
 from .constants import WEEKDAYS, MONTHS
 
 class DocumentParser:
-    _practice_pattern = re.compile(r'^# (.+)$')
     _task_pattern = re.compile(r'^(\s*)-\s+(?:\[([ x])\]\s+)?(.+)$')
     _tag_pattern = re.compile(r'#([\wÀ-ÿ-]+)')
     _person_pattern = re.compile(r'@([A-Za-zÀ-ÿ]+(?:\s[A-Za-zÀ-ÿ]+)*)')
-    _file_pattern = re.compile(r"""@(?:['"]([^'"]+)['"]|([^\s#@]+))""")
     _today_pattern = re.compile(r'\boggi\b', re.IGNORECASE)
     _tomorrow_pattern = re.compile(r'\bdomani\b', re.IGNORECASE)
     _date_pattern = re.compile(
         r'(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)',
         re.IGNORECASE
     )
-    _clean_file_pattern = re.compile(r"""@(?:['"][^'"]+['"]|[^\s#@]+)""")
     _multi_space_pattern = re.compile(r'\s+')
     
     def parse_document(self, text: str) -> List[DocumentNode]:
@@ -24,10 +22,10 @@ class DocumentParser:
         lines = text.split('\n')
         
         for i, line in enumerate(lines):
-            practice_match = self._practice_pattern.match(line)
-            if practice_match:
+            practice = parse_practice_heading(line)
+            if practice:
                 nodes.append(DocumentNode(
-                    text=practice_match.group(1).strip(),
+                    text=practice[0],
                     level=0, line_number=i, is_task=False
                 ))
                 continue
@@ -72,11 +70,7 @@ class DocumentParser:
             'dates': [], 'files': [],
             'status': TaskStatus.OPEN.value
         }
-        
-        for match in self._file_pattern.finditer(text):
-            filename = match.group(1) or match.group(2)
-            if filename:
-                metadata['files'].append(filename)
+        metadata['files'] = extract_file_mentions(text)
         
         today = datetime.now()
         if self._today_pattern.search(text):
@@ -105,7 +99,7 @@ class DocumentParser:
     
     @classmethod
     def clean_task_text(cls, text: str) -> str:
-        cleaned = cls._clean_file_pattern.sub('', text)
+        cleaned = remove_file_mentions(text)
         return cls._multi_space_pattern.sub(' ', cleaned).strip()
     
     @classmethod

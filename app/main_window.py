@@ -1,4 +1,3 @@
-﻿import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +19,9 @@ from app.parser import DocumentParser
 from app.models import DocumentNode
 from app.constants import FILE_ICONS
 from app.history import DocumentHistory
+from app.agenda_markup import editor_to_raw_text, parse_practice_paths, raw_to_editor_text
+from app.presence import WorkspacePresence
+from app.system_open import find_named_path, open_path
 from app.widgets import PracticeEditor, AutocompletePopup, CommandPalette
 from app.widgets.settings_dialog import SettingsDialog
 from app.widgets.pomodoro_timer import PomodoroTimer
@@ -29,7 +31,6 @@ class PracticeWorkspace(QMainWindow):
     def __init__(self):
         super().__init__()
         self.workspace_path: Optional[Path] = None
-        self.current_practice: Optional[str] = None
         self.parser = DocumentParser()
         self.file_watcher = QFileSystemWatcher()
         self.autocomplete_popup = None
@@ -40,7 +41,7 @@ class PracticeWorkspace(QMainWindow):
         # Timer per salvataggio automatico
         self._autosave_timer = QTimer()
         self._autosave_timer.timeout.connect(self._autosave)
-        self._session_id = os.environ.get('COMPUTERNAME', 'unknown')
+        self.presence: Optional[WorkspacePresence] = None
         self._presence_timer = QTimer()
         self._presence_timer.timeout.connect(self._update_presence)
         self._autosave_interval = 60  # secondi, 0 = disabilitato
@@ -119,19 +120,12 @@ class PracticeWorkspace(QMainWindow):
         if not self.workspace_path:
             return
         
-        clean_text = self.editor.toPlainText()
-        lines = clean_text.split('\n')
-        new_lines = []
-        for line in lines:
-            if line.startswith('# '):
-                name = line[2:].strip()
-                if name in self.practice_paths:
-                    new_lines.append(f'# [{name}]({self.practice_paths[name]})')
-                else:
-                    new_lines.append(line)
-            else:
-                new_lines.append(line)
-        current_with_paths = '\n'.join(new_lines)
+        current_with_paths = editor_to_raw_text(
+            self.editor.toPlainText(),
+            self.workspace_path,
+            self.practice_paths,
+            resolve_links=False,
+        )
         
         if current_with_paths != self.editor.last_saved_content:
             self.workspace_label.setText("Agenda.md *")
@@ -226,25 +220,8 @@ class PracticeWorkspace(QMainWindow):
 
     def _open_path(self, path: Path):
         """Apre un file o una cartella in modo portabile (Bug #10)."""
-        import sys
-        import subprocess
-        path_str = str(path)
-        try:
-            if sys.platform == 'win32':
-                os.startfile(path_str)
-            elif sys.platform == 'darwin':
-                subprocess.Popen(['open', path_str])
-            else:
-                subprocess.Popen(['xdg-open', path_str])
-        except (OSError, AttributeError):
-            # Fallback per Windows se startfile fallisce
-            if sys.platform == 'win32':
-                if path.is_dir():
-                    subprocess.Popen(['explorer.exe', path_str])
-                else:
-                    subprocess.Popen(['notepad.exe', path_str])
-            else:
-                self.status_bar.showMessage(f"Impossibile aprire: {path.name}", 3000)
+        if not open_path(path):
+            self.status_bar.showMessage(f"Impossibile aprire: {path.name}", 3000)
 
     def _open_agenda_external(self):
         """Apre Agenda.md con l'applicazione predefinita di sistema o Notepad."""
@@ -297,6 +274,7 @@ class PracticeWorkspace(QMainWindow):
             )
         self._load_document(agenda_file)
         self.document_history = DocumentHistory(self.workspace_path)
+        self.presence = WorkspacePresence(self.workspace_path)
         self._check_presence()
         self._update_presence()
         self._presence_timer.start(30000)
@@ -306,20 +284,8 @@ class PracticeWorkspace(QMainWindow):
     def _load_document(self, file_path: Path):
         try:
             raw_content = file_path.read_text(encoding='utf-8')
-            self.practice_paths = dict(
-                re.findall(r'^# \[([^\]]+)\]\(([^)]+)\)', raw_content, re.MULTILINE)
-            )
-            
-            # Pulisci prima i path delle pratiche
-            clean_content = re.sub(
-                r'^# \[(.+?)\]\(.+?\)$', r'# \1', raw_content, flags=re.MULTILINE
-            )
-
-            # Pulisci i riferimenti ai file: @[testo](path) -> @testo
-            # Usiamo una regex più robusta che gestisce testi con parentesi
-            clean_content = re.sub(
-                r'@\[(.+?)\]\(.+?\)', r'@\1', clean_content
-            )
+            self.practice_paths = parse_practice_paths(raw_content)
+            clean_content = raw_to_editor_text(raw_content)
 
             self.editor.setPlainText(clean_content)
             self.editor.last_saved_content = raw_content
@@ -329,48 +295,15 @@ class PracticeWorkspace(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile caricare il documento: {e}")
 
-    def _sessions_file(self):
-        return self.workspace_path / "Agenda.md.sessions.yaml" if self.workspace_path else None
-
-    def _read_sessions(self):
-        file = self._sessions_file()
-        if file and file.exists():
-            return yaml.safe_load(file.read_text(encoding='utf-8')) or {}
-        return {}
-
-    def _write_sessions(self, sessions):
-        file = self._sessions_file()
-        if file:
-            file.write_text(yaml.dump(sessions, allow_unicode=True), encoding='utf-8')
-
     def _update_presence(self):
-        sessions = self._read_sessions()
-        sessions[self._session_id] = {
-            'username': os.environ.get('USERNAME', 'unknown'),
-            'last_seen': datetime.now().isoformat(),
-            'status': 'active'
-        }
-        now = datetime.now()
-        for sid in list(sessions.keys()):
-            if sid != self._session_id:
-                last_seen = sessions[sid].get('last_seen')
-                if last_seen:
-                    try:
-                        last = datetime.fromisoformat(last_seen)
-                    except ValueError:
-                        continue
-                    if (now - last).seconds > 300:
-                        sessions[sid]['status'] = 'away'
-        self._write_sessions(sessions)
+        if self.presence:
+            self.presence.touch_active()
 
     def _check_presence(self):
-        sessions = self._read_sessions()
-        active = {
-            k: v for k, v in sessions.items()
-            if k != self._session_id and v.get('status') == 'active'
-        }
-        if active:
-            names = [f"{v['username']} ({k})" for k, v in active.items()]
+        if self.presence:
+            names = self.presence.active_peers()
+            if not names:
+                return
             self.status_bar.showMessage(
                 f"Workspace condiviso con: {', '.join(names)}", 5000
             )
@@ -380,30 +313,11 @@ class PracticeWorkspace(QMainWindow):
             return
         agenda_file = self.workspace_path / "Agenda.md"
         try:
-            clean_text = self.editor.toPlainText()
-            lines = clean_text.split('\n')
-            
-            new_lines = []
-            # Default alla radice del workspace per file fuori dalle pratiche (Bug #6)
-            current_practice_path = "."
-            
-            for line in lines:
-                if line.startswith('# '):
-                    name = line[2:].strip()
-                    if name in self.practice_paths:
-                        current_practice_path = self.practice_paths[name]
-                        new_lines.append(f'# [{name}]({current_practice_path})')
-                    else:
-                        current_practice_path = "."
-                        new_lines.append(line)
-                else:
-                    # Sostituisci i riferimenti @file con @[file](path) se il file esiste
-                    if current_practice_path:
-                        practice_dir = self.workspace_path / current_practice_path
-                        line = self._resolve_file_links(line, practice_dir)
-                    new_lines.append(line)
-            
-            content_with_paths = '\n'.join(new_lines)
+            content_with_paths = editor_to_raw_text(
+                self.editor.toPlainText(),
+                self.workspace_path,
+                self.practice_paths,
+            )
             if (
                 self.document_history
                 and self.editor.last_saved_content
@@ -426,41 +340,6 @@ class PracticeWorkspace(QMainWindow):
                 # Logga silenziosamente l'errore di autosave
                 import sys
                 print(f"Autosave error: {e}", file=sys.stderr)
-
-    def _resolve_file_links(self, line: str, practice_dir: Path) -> str:
-        """Sostituisce @nomefile con @['nomefile'](path/relativo) se il file esiste,
-        normalizzando con apici i nomi che contengono spazi o parentesi."""
-        import re
-        pattern = re.compile(r"""@(?:'([^']+)'|"([^"]+)"|\[([^\]]+)\]\([^)]+\)|(\S+))""")
-        
-        def replace_match(match):
-            # Gestisce: @'nome', @"nome", @[nome](path), @nome
-            filename = match.group(1) or match.group(2) or match.group(3) or match.group(4)
-            if not filename:
-                return match.group(0)
-            
-            # Calcola il path relativo
-            try:
-                rel = (practice_dir / filename).relative_to(self.workspace_path)
-                rel_str = str(rel).replace('\\', '/')
-            except ValueError:
-                rel_str = None
-            
-            # Costruisci il riferimento normalizzato
-            if ' ' in filename or '(' in filename or ')' in filename:
-                # Nomi complessi: usa sempre @['nome'](path)
-                if rel_str:
-                    return f"@['{filename}']({rel_str})"
-                else:
-                    return f"@'{filename}'"
-            else:
-                # Nomi semplici: @[nome](path) o @nome
-                if rel_str:
-                    return f"@[{filename}]({rel_str})"
-                else:
-                    return f"@{filename}"
-        
-        return pattern.sub(replace_match, line)
 
     def _on_practice_renamed(self, old_name, new_name):
         """Aggiorna il dizionario quando una pratica viene rinominata."""
@@ -504,27 +383,11 @@ class PracticeWorkspace(QMainWindow):
         if not self.workspace_path:
             return
         
-        # Rigenera il contenuto con i path correnti per il confronto
-        clean_text = self.editor.toPlainText()
-        lines = clean_text.split('\n')
-        new_lines = []
-        current_practice_path = "."
-        for line in lines:
-            if line.startswith('# '):
-                name = line[2:].strip()
-                if name in self.practice_paths:
-                    current_practice_path = self.practice_paths[name]
-                    new_lines.append(f'# [{name}]({current_practice_path})')
-                else:
-                    current_practice_path = "."
-                    new_lines.append(line)
-            else:
-                if current_practice_path:
-                    practice_dir = self.workspace_path / current_practice_path
-                    line = self._resolve_file_links(line, practice_dir)
-                new_lines.append(line)
-        
-        current_with_paths = '\n'.join(new_lines)
+        current_with_paths = editor_to_raw_text(
+            self.editor.toPlainText(),
+            self.workspace_path,
+            self.practice_paths,
+        )
         
         if current_with_paths != self.editor.last_saved_content:
             self._save_document(is_autosave=True)
@@ -586,15 +449,6 @@ class PracticeWorkspace(QMainWindow):
         self.status_bar.showMessage(f"Nessun path per '{practice_name}'", 3000)
         return False
 
-    def _find_practice_folder_for_file(self, practice_name: str) -> Optional[Path]:
-        if not self.workspace_path:
-            return None
-        if practice_name in self.practice_paths:
-            full_path = self.workspace_path / self.practice_paths[practice_name]
-            if full_path.is_dir():
-                return full_path
-        return None
-
     def _open_file(self, filename: str):
         """Apre il file o la cartella. Se ha un path salvato lo usa direttamente."""
         if not self.workspace_path:
@@ -602,39 +456,15 @@ class PracticeWorkspace(QMainWindow):
         
         clean_filename = filename.strip("'\"")
         
-        # Se il filename contiene già un path (formato @[nome](path)), estrailo
-        # Ma l'editor lo pulisce, quindi qui arriva solo il nome.
-        # Cerchiamo nel testo originale per vedere se c'è un path salvato.
         practice_name = self.editor.get_current_practice_name()
         
         if practice_name and practice_name in self.practice_paths:
             practice_dir = self.workspace_path / self.practice_paths[practice_name]
-            target = practice_dir / clean_filename
-            if target.exists():
-                try:
-                    os.startfile(str(target))
-                except OSError:
-                    import subprocess
-                    # Se fallisce startfile, prova con explorer per le cartelle o notepad per file ignoti
-                    if target.is_dir():
-                        subprocess.Popen(['explorer.exe', str(target)])
-                    else:
-                        subprocess.Popen(['notepad.exe', str(target)])
+            target = find_named_path(practice_dir, clean_filename)
+            if target:
+                self._open_path(target)
                 self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
                 return
-            # Cerca nei sottodirectory
-            for f in practice_dir.rglob(clean_filename):
-                if f.is_file() or f.is_dir():
-                    try:
-                        os.startfile(str(f))
-                    except OSError:
-                        import subprocess
-                        if f.is_dir():
-                            subprocess.Popen(['explorer.exe', str(f)])
-                        else:
-                            subprocess.Popen(['notepad.exe', str(f)])
-                    self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
-                    return
         
         QMessageBox.warning(self, "File non trovato",
                            f"Il file '{clean_filename}' non è stato trovato nella pratica corrente.")
@@ -793,14 +623,9 @@ class PracticeWorkspace(QMainWindow):
         practice_dir = self.workspace_path / self.practice_paths[practice_name]
         if not practice_dir.is_dir():
             return self._make_missing_file_item(filename, "Cartella pratica non trovata")
-        file_path = practice_dir / filename
-        if not file_path.exists():
-            for f in practice_dir.rglob(filename):
-                if f.is_file():
-                    file_path = f
-                    break
-            else:
-                return self._make_missing_file_item(filename, "File non trovato nella cartella")
+        file_path = find_named_path(practice_dir, filename)
+        if not file_path:
+            return self._make_missing_file_item(filename, "File non trovato nella cartella")
         file_item = QTreeWidgetItem()
         icon = FILE_ICONS.get(file_path.suffix.lower(), '📎')
         file_item.setText(0, f"{icon} {filename}")
@@ -1123,19 +948,12 @@ class PracticeWorkspace(QMainWindow):
         
         # Rigenera il contenuto con path per confrontarlo con last_saved_content
         if self.workspace_path:
-            clean_text = self.editor.toPlainText()
-            lines = clean_text.split('\n')
-            new_lines = []
-            for line in lines:
-                if line.startswith('# '):
-                    name = line[2:].strip()
-                    if name in self.practice_paths:
-                        new_lines.append(f'# [{name}]({self.practice_paths[name]})')
-                    else:
-                        new_lines.append(line)
-                else:
-                    new_lines.append(line)
-            current_with_paths = '\n'.join(new_lines)
+            current_with_paths = editor_to_raw_text(
+                self.editor.toPlainText(),
+                self.workspace_path,
+                self.practice_paths,
+                resolve_links=False,
+            )
             
             if current_with_paths != self.editor.last_saved_content:
                 reply = QMessageBox.question(
@@ -1149,11 +967,8 @@ class PracticeWorkspace(QMainWindow):
                     event.ignore()
                     return
 
-        sessions = self._read_sessions()
-        if self._session_id in sessions:
-            sessions[self._session_id]['status'] = 'closed'
-            sessions[self._session_id]['last_seen'] = datetime.now().isoformat()
-            self._write_sessions(sessions)
+        if self.presence:
+            self.presence.mark_closed()
         
         event.accept()
 

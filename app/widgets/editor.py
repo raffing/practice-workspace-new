@@ -50,7 +50,6 @@ class PracticeEditor(QTextEdit):
         self.line_number_area = LineNumberArea(self)
         self.document().blockCountChanged.connect(self.update_line_number_area_width)
         self.verticalScrollBar().valueChanged.connect(self.update_line_number_area_scroll)
-        self.cursorPositionChanged.connect(self.highlight_current_line)
         self.update_line_number_area_width(0)
         self.setTabStopDistance(40)
         self.setAcceptRichText(False)
@@ -62,7 +61,6 @@ class PracticeEditor(QTextEdit):
         self._cached_practice_name = ""
         self._cached_block_number = -1
         self._folded_blocks: Set[int] = set()
-        self._fold_markers: Dict[int, QRect] = {}
 
     def _setup_font(self):
         preferred_fonts = ["JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas"]
@@ -125,44 +123,7 @@ class PracticeEditor(QTextEdit):
             block_number += 1
 
     def line_number_area_mouse_press(self, event):
-        for block_number, rect in self._fold_markers.items():
-            if rect.contains(event.pos()):
-                self._toggle_fold(block_number)
-                return
-
-    def _toggle_fold(self, block_number: int):
-        """Piega o espandi un task e i suoi figli."""
-        block = self.document().findBlockByLineNumber(block_number)
-        if not block.isValid():
-            return
-
-        text = block.text()
-        indent = len(text) - len(text.lstrip())
-
-        if block_number in self._folded_blocks:
-            self._folded_blocks.remove(block_number)
-            visible = True
-        else:
-            self._folded_blocks.add(block_number)
-            visible = False
-
-        next_block = block.next()
-        while next_block.isValid():
-            next_text = next_block.text()
-            if next_text.strip():
-                next_indent = len(next_text) - len(next_text.lstrip())
-                if next_indent <= indent:
-                    break
-            next_block.setVisible(visible)
-            next_block = next_block.next()
-
-        self.document().markContentsDirty(block.position(), self.document().characterCount())
-        self.line_number_area.update()
-        self.viewport().update()
-        self.update()
-
-    def highlight_current_line(self):
-        pass
+        return
 
     def update_theme(self, theme: Dict):
         self.setStyleSheet(f"""
@@ -652,53 +613,47 @@ class PracticeEditor(QTextEdit):
                 self.setTextCursor(cursor)
                 self.setFocus()
                 self.ensureCursorVisible()
+
     def _toggle_fold_current(self):
         """Piega/espandi la pratica o il task corrente con Ctrl+Shift+F."""
-        cursor = self.textCursor()
-        block = cursor.block()
+        self._toggle_fold_block(self.textCursor().block())
+
+    def _toggle_fold_block(self, block):
+        if not block.isValid():
+            return
+
         text = block.text().strip()
-        
         if text.startswith('# '):
-            # Folding pratica: piega tutti i task fino alla prossima pratica
-            block_number = block.blockNumber()
-            
-            if block_number in self._folded_blocks:
-                self._folded_blocks.remove(block_number)
-                visible = True
-            else:
-                self._folded_blocks.add(block_number)
-                visible = False
-            
-            next_block = block.next()
-            while next_block.isValid():
-                next_text = next_block.text().strip()
-                if next_text.startswith('# '):
-                    break
-                next_block.setVisible(visible)
-                next_block = next_block.next()
-        
+            self._set_following_blocks_visible(block, self._toggle_fold_visibility(block), "practice")
         elif text.startswith('- '):
-            # Folding task: piega i sotto-task
-            block_number = block.blockNumber()
-            raw_text = block.text()
-            indent = len(raw_text) - len(raw_text.lstrip())
-            
-            if block_number in self._folded_blocks:
-                self._folded_blocks.remove(block_number)
-                visible = True
-            else:
-                self._folded_blocks.add(block_number)
-                visible = False
-            
-            next_block = block.next()
-            while next_block.isValid():
-                next_text = next_block.text()
-                if next_text.strip():
-                    next_indent = len(next_text) - len(next_text.lstrip())
-                    if next_indent <= indent:
-                        break
-                next_block.setVisible(visible)
-                next_block = next_block.next()
-        
+            self._set_following_blocks_visible(block, self._toggle_fold_visibility(block), "task")
+        else:
+            return
+
+        self.document().markContentsDirty(block.position(), self.document().characterCount())
         self.line_number_area.update()
         self.viewport().update()
+        self.update()
+
+    def _toggle_fold_visibility(self, block) -> bool:
+        block_number = block.blockNumber()
+        if block_number in self._folded_blocks:
+            self._folded_blocks.remove(block_number)
+            return True
+        self._folded_blocks.add(block_number)
+        return False
+
+    def _set_following_blocks_visible(self, block, visible: bool, scope: str):
+        base_indent = len(block.text()) - len(block.text().lstrip())
+        next_block = block.next()
+        while next_block.isValid():
+            next_text = next_block.text()
+            stripped = next_text.strip()
+            if stripped:
+                if scope == "practice" and stripped.startswith('# '):
+                    break
+                next_indent = len(next_text) - len(next_text.lstrip())
+                if scope == "task" and next_indent <= base_indent:
+                    break
+            next_block.setVisible(visible)
+            next_block = next_block.next()
