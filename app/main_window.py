@@ -310,15 +310,17 @@ class PracticeWorkspace(QMainWindow):
                 re.findall(r'^# \[([^\]]+)\]\(([^)]+)\)', raw_content, re.MULTILINE)
             )
             
-            # Pulisce i path delle pratiche
+            # Pulisci prima i path delle pratiche
             clean_content = re.sub(
-                r'^# \[([^\]]+)\]\([^)]+\)', r'# \1', raw_content, flags=re.MULTILINE
+                r'^# \[(.+?)\]\(.+?\)$', r'# \1', raw_content, flags=re.MULTILINE
             )
-            # Pulisce i path dei file: @[nome](path) -> @nome
+
+            # Pulisci i riferimenti ai file: @[testo](path) -> @testo
+            # Usiamo una regex più robusta che gestisce testi con parentesi
             clean_content = re.sub(
-                r'@\[([^\]]+)\]\([^)]+\)', r'@\1', clean_content, flags=re.MULTILINE
+                r'@\[(.+?)\]\(.+?\)', r'@\1', clean_content
             )
-            
+
             self.editor.setPlainText(clean_content)
             self.editor.last_saved_content = raw_content
             self._update_modified_indicator()
@@ -426,23 +428,37 @@ class PracticeWorkspace(QMainWindow):
                 print(f"Autosave error: {e}", file=sys.stderr)
 
     def _resolve_file_links(self, line: str, practice_dir: Path) -> str:
-        """Sostituisce @nomefile con @[nomefile](path/relativo) deterministicamente."""
+        """Sostituisce @nomefile con @['nomefile'](path/relativo) se il file esiste,
+        normalizzando con apici i nomi che contengono spazi o parentesi."""
         import re
-        pattern = re.compile(r"""@(?:'([^']+)'|"([^"]+)"|(\S+))""")
+        pattern = re.compile(r"""@(?:'([^']+)'|"([^"]+)"|\[([^\]]+)\]\([^)]+\)|(\S+))""")
         
         def replace_match(match):
-            filename = match.group(1) or match.group(2) or match.group(3)
+            # Gestisce: @'nome', @"nome", @[nome](path), @nome
+            filename = match.group(1) or match.group(2) or match.group(3) or match.group(4)
             if not filename:
                 return match.group(0)
             
-            # Calcola sempre il path relativo (non controlla esistenza)
+            # Calcola il path relativo
             try:
                 rel = (practice_dir / filename).relative_to(self.workspace_path)
                 rel_str = str(rel).replace('\\', '/')
-                return f"@[{filename}]({rel_str})"
             except ValueError:
-                pass
-            return match.group(0)
+                rel_str = None
+            
+            # Costruisci il riferimento normalizzato
+            if ' ' in filename or '(' in filename or ')' in filename:
+                # Nomi complessi: usa sempre @['nome'](path)
+                if rel_str:
+                    return f"@['{filename}']({rel_str})"
+                else:
+                    return f"@'{filename}'"
+            else:
+                # Nomi semplici: @[nome](path) o @nome
+                if rel_str:
+                    return f"@[{filename}]({rel_str})"
+                else:
+                    return f"@{filename}"
         
         return pattern.sub(replace_match, line)
 
@@ -938,9 +954,8 @@ class PracticeWorkspace(QMainWindow):
                         pass
                 cursor.insertText(f" {item}\n")
             else:
-                # Quando si seleziona un file dall'autocomplete, inserisci @'nomefile' normalmente. 
-                # Il path verrà aggiunto al salvataggio.
-                item_to_insert = f"'{item}'" if " " in item else item
+                # Per i file: metti SEMPRE gli apici per proteggere spazi e parentesi
+                item_to_insert = f"'{item}'"
                 cursor.insertText(f"{prefix}{item_to_insert}\n")
         self.editor.setTextCursor(cursor)
         self.editor.autocomplete_active = False
