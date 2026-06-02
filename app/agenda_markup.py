@@ -17,8 +17,12 @@ def parse_practice_heading(line: str) -> Optional[Tuple[str, Optional[str]]]:
         close_label = line.find("](")
         if close_label > 3:
             name = line[3:close_label]
-            path = line[close_label + 2:-1]
-            return name.strip(), path.strip()
+            path = line[close_label + 2:-1].strip()
+            # Pulisce il path: rimuovi # iniziali e normalizza
+            path = path.lstrip("#").strip()
+            if path:
+                return name.strip(), path
+            return name.strip(), None
     if line.startswith("# "):
         return line[2:].strip(), None
     return None
@@ -31,6 +35,24 @@ def parse_practice_paths(text: str) -> Dict[str, str]:
         if parsed and parsed[1]:
             paths[parsed[0]] = parsed[1]
     return paths
+
+
+def parse_file_paths(text: str) -> Dict[str, str]:
+    """Parse file links from raw content: @['filename'](path) or @[filename](path)."""
+    file_paths: Dict[str, str] = {}
+    pattern = re.compile(r"@\[('([^']+)'|([^\]]+))\]\(([^)]+)\)")
+    for line in text.splitlines():
+        for match in pattern.finditer(line):
+            # Extract filename (from quoted or unquoted group)
+            filename = match.group(2) or match.group(3)
+            if not filename:
+                continue
+            path = match.group(4).strip()
+            # Clean path: remove leading # and whitespace, normalize separators
+            path = path.lstrip("#").strip().replace("\\", "/")
+            if path:
+                file_paths[filename] = path
+    return file_paths
 
 
 def editor_file_token(label: str) -> str:

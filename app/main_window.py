@@ -19,7 +19,7 @@ from app.parser import DocumentParser
 from app.models import DocumentNode
 from app.constants import FILE_ICONS
 from app.history import DocumentHistory
-from app.agenda_markup import editor_to_raw_text, parse_practice_paths, raw_to_editor_text
+from app.agenda_markup import editor_to_raw_text, parse_practice_paths, parse_file_paths, raw_to_editor_text
 from app.presence import WorkspacePresence
 from app.system_open import find_named_path, open_path
 from app.widgets import PracticeEditor, AutocompletePopup, CommandPalette
@@ -44,6 +44,7 @@ class PracticeWorkspace(QMainWindow):
         self.workspace_path: Optional[Path] = None
         self.parser = DocumentParser()
         self.practice_paths: Dict[str, str] = {}
+        self.file_paths: Dict[str, str] = {}
         self.document_history = None
         self.current_task_line = -1
         self.current_theme_mode = ThemeMode.AUTO
@@ -323,6 +324,7 @@ class PracticeWorkspace(QMainWindow):
         try:
             raw_content = file_path.read_text(encoding='utf-8')
             self.practice_paths = parse_practice_paths(raw_content)
+            self.file_paths = parse_file_paths(raw_content)
             clean_content = raw_to_editor_text(raw_content)
             
             self.editor.setPlainText(clean_content)
@@ -345,7 +347,11 @@ class PracticeWorkspace(QMainWindow):
                 self.editor.toPlainText(),
                 self.workspace_path,
                 self.practice_paths,
+                resolve_links=True,
             )
+            
+            # Update file_paths from the new content
+            self.file_paths = parse_file_paths(content_with_paths)
             
             # Save to history if changed
             if (self.document_history and 
@@ -377,6 +383,7 @@ class PracticeWorkspace(QMainWindow):
             self.editor.toPlainText(),
             self.workspace_path,
             self.practice_paths,
+            resolve_links=True,
         )
         
         if current_with_paths != self.editor.last_saved_content:
@@ -443,7 +450,7 @@ class PracticeWorkspace(QMainWindow):
             self.editor.toPlainText(),
             self.workspace_path,
             self.practice_paths,
-            resolve_links=False,
+            resolve_links=True,
         )
         
         if current_with_paths != self.editor.last_saved_content:
@@ -509,6 +516,7 @@ class PracticeWorkspace(QMainWindow):
         root_item.setFont(0, font)
         
         self.tree_widget.addTopLevelItem(root_item)
+        assert self.workspace_path is not None
         self._populate_tree_folder(root_item, self.workspace_path)
         root_item.setExpanded(False)
 
@@ -526,7 +534,7 @@ class PracticeWorkspace(QMainWindow):
             practice_item = self._create_practice_item(practice_node)
             practices_item.addChild(practice_item)
             
-            practice_files = set()
+            practice_files: set[str] = set()
             for task_node in practice_node.children:
                 self._add_task_to_tree(task_node, practice_item, practice_files)
             
@@ -545,7 +553,7 @@ class PracticeWorkspace(QMainWindow):
         font = item.font(0)
         font.setBold(True)
         item.setFont(0, font)
-        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         return item
 
     def _create_practice_item(self, practice_node: DocumentNode) -> QTreeWidgetItem:
@@ -574,7 +582,7 @@ class PracticeWorkspace(QMainWindow):
         font = file_section.font(0)
         font.setItalic(True)
         file_section.setFont(0, font)
-        file_section.setFlags(file_section.flags() & ~Qt.ItemIsSelectable)
+        file_section.setFlags(file_section.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         parent_item.addChild(file_section)
         
         for filename in sorted(files):
@@ -650,7 +658,7 @@ class PracticeWorkspace(QMainWindow):
 
     def _get_task_extras(self, task_data: Optional[Dict]) -> list:
         """Estrae informazioni extra dal task data."""
-        extras = []
+        extras: list[str] = []
         if not task_data:
             return extras
         
@@ -747,6 +755,7 @@ class PracticeWorkspace(QMainWindow):
     def _add_folder_as_practice(self, folder_path: Path):
         """Aggiunge una cartella come pratica."""
         folder_name = folder_path.name
+        assert self.workspace_path is not None
         try:
             rel = folder_path.relative_to(self.workspace_path)
             rel_str = str(rel).replace('\\', '/')
@@ -817,8 +826,17 @@ class PracticeWorkspace(QMainWindow):
             return
         
         clean_filename = filename.strip("'\"")
-        practice_name = self.editor.get_current_practice_name()
         
+        # 1. Cerca nel dizionario file_paths (link espliciti salvati in Agenda.md)
+        if clean_filename in self.file_paths:
+            file_path = self.workspace_path / self.file_paths[clean_filename]
+            if file_path.exists():
+                self._open_path(file_path)
+                self.status_bar.showMessage(f"Aperto: {clean_filename}", 3000)
+                return
+        
+        # 2. Cerca nella pratica corrente
+        practice_name = self.editor.get_current_practice_name()
         if practice_name and practice_name in self.practice_paths:
             practice_dir = self.workspace_path / self.practice_paths[practice_name]
             target = find_named_path(practice_dir, clean_filename)
@@ -828,7 +846,7 @@ class PracticeWorkspace(QMainWindow):
                 return
         
         QMessageBox.warning(self, "File non trovato",
-                           f"Il file '{clean_filename}' non è stato trovato nella pratica corrente.")
+                           f"Il file '{clean_filename}' non è stato trovato.")
 
     def _on_practice_name_clicked(self, practice_name: str):
         """Gestisce il click sul nome pratica nell'editor."""
@@ -885,7 +903,7 @@ class PracticeWorkspace(QMainWindow):
         self.editor.autocomplete_active = False
         self.autocomplete_popup = None
 
-    def _insert_autocomplete_item(self, item: str, position: int, full_path: Path = None):
+    def _insert_autocomplete_item(self, item: str, position: int, full_path: Path | None = None):
         """Inserisce l'elemento selezionato dall'autocompletamento."""
         cursor = self.editor.textCursor()
         cursor.setPosition(position)
@@ -903,6 +921,7 @@ class PracticeWorkspace(QMainWindow):
                 cursor.insertText(f"{prefix}{name}\n")
         else:
             if is_practice and full_path is not None and full_path.is_dir():
+                assert self.workspace_path is not None
                 try:
                     rel = full_path.relative_to(self.workspace_path)
                     rel_str = str(rel).replace('\\', '/')
@@ -1005,7 +1024,7 @@ class PracticeWorkspace(QMainWindow):
         elif command_id == "new_task":
             self.editor.setFocus()
             cursor = self.editor.textCursor()
-            cursor.movePosition(QTextCursor.End)
+            cursor.movePosition(QTextCursor.MoveOperation.End)
             self.editor.setTextCursor(cursor)
             self.editor.insertPlainText("\n- ")
 
@@ -1227,7 +1246,7 @@ class PracticeWorkspace(QMainWindow):
                 self.editor.toPlainText(),
                 self.workspace_path,
                 self.practice_paths,
-                resolve_links=False,
+                resolve_links=True,
             )
             
             if current_with_paths != self.editor.last_saved_content:
